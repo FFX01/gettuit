@@ -19,6 +19,12 @@ const (
 	helpMode
 )
 
+var modeMap = map[mode]string{
+	normalMode: "Normal",
+	inputMode:  "Input",
+	helpMode:   "Help",
+}
+
 var (
 	backgroundColor tcell.Color = tcell.NewHexColor(0x284B63)
 	foregroundColor tcell.Color = tcell.NewHexColor(0xF4F9E9)
@@ -31,14 +37,15 @@ type Keybind struct {
 }
 
 type App struct {
-	screen   tcell.Screen
-	todos    []Todo
-	cursorY  int
-	cursorX  int
-	mode     mode
-	helpMode mode
-	quit     bool
-	keybinds map[mode]map[tcell.Key]Keybind
+	screen          tcell.Screen
+	todos           []Todo
+	cursorY         int
+	cursorX         int
+	mode            mode
+	helpMode        mode
+	quit            bool
+	keybinds        map[mode]map[tcell.Key]Keybind
+	keybindHelpText map[mode][]string
 }
 
 type DataSchema struct {
@@ -65,9 +72,10 @@ func NewApp() *App {
 			{text: "Example todo 2"},
 			{text: "Example todo 3"},
 		},
-		mode:     normalMode,
-		helpMode: normalMode,
-		keybinds: make(map[mode]map[tcell.Key]Keybind),
+		mode:            normalMode,
+		helpMode:        normalMode,
+		keybinds:        make(map[mode]map[tcell.Key]Keybind),
+		keybindHelpText: make(map[mode][]string),
 	}
 
 	err = app.loadFromDisk()
@@ -78,7 +86,7 @@ func NewApp() *App {
 	return &app
 }
 
-func (app *App) Bind(m mode, key tcell.Key, name, description string, callback func(*tcell.EventKey)) {
+func (app *App) Bind(m mode, key tcell.Key, name, description string, showInHelp bool, callback func(*tcell.EventKey)) {
 	kb := Keybind{
 		name:        name,
 		description: description,
@@ -90,6 +98,29 @@ func (app *App) Bind(m mode, key tcell.Key, name, description string, callback f
 		app.keybinds[m] = make(map[tcell.Key]Keybind)
 	}
 	app.keybinds[m][key] = kb
+
+    if !showInHelp {
+        return
+    }
+
+	ekey := tcell.NewEventKey(key, rune(key), tcell.ModNone)
+	var keyText string
+	if ekey.Name()[:3] == "Key" {
+		keyText = string(key)
+	} else {
+		keyText = ekey.Name()
+	}
+
+	if keyText == " " {
+		keyText = "<space>"
+	}
+
+	_, exists = app.keybindHelpText[m]
+	if !exists {
+		app.keybindHelpText[m] = []string{}
+	}
+	text := fmt.Sprintf("%s - %s [%s]", keyText, name, description)
+	app.keybindHelpText[m] = append(app.keybindHelpText[m], text)
 }
 
 func (app *App) Quit(_ *tcell.EventKey) {
@@ -153,6 +184,14 @@ func (app *App) markTodoComplete(_ *tcell.EventKey) {
 	if err != nil {
 		panic("Could not write file")
 	}
+}
+
+func (app *App) onJumpToTop(_ *tcell.EventKey) {
+	app.cursorY = 0
+}
+
+func (app *App) onJumpToBottom(_ *tcell.EventKey) {
+	app.cursorY = len(app.todos) - 1
 }
 
 func (app *App) onAddTodo(_ *tcell.EventKey) {
@@ -267,7 +306,7 @@ func (app *App) onInputBackspace(_ *tcell.EventKey) {
 	if app.cursorX > 0 {
 		head := todo.tempText[:app.cursorX-1]
 		var tail string
-		if app.cursorX < len(todo.text) {
+		if app.cursorX < len(todo.tempText) {
 			tail = todo.tempText[app.cursorX:]
 		}
 		todo.tempText = head + tail
@@ -283,7 +322,7 @@ func (app *App) onInputCursorLeft(_ *tcell.EventKey) {
 }
 
 func (app *App) onInputCursorRight(_ *tcell.EventKey) {
-	lineLen := len(app.todos[app.cursorY].tempText) + 4
+	lineLen := len(app.todos[app.cursorY].tempText)
 	if app.cursorX < lineLen {
 		app.cursorX++
 	}
@@ -335,15 +374,7 @@ func (app *App) DrawStatus() {
 		Background(backgroundColor).
 		Foreground(foregroundColor)
 
-	statusText := " Mode: "
-	switch app.mode {
-	case normalMode:
-		statusText += "Normal"
-	case inputMode:
-		statusText += "Input"
-	case helpMode:
-		statusText += "Help"
-	}
+	statusText := " Mode: " + modeMap[app.mode]
 	for idx := 0; idx <= width; idx++ {
 		if idx < len(statusText) {
 			char := rune(statusText[idx])
@@ -369,31 +400,52 @@ func (app *App) DrawHelpModal() {
 		}
 	}
 
-	keybinds, exists := app.keybinds[app.helpMode]
+	yIndex := marginY + 2
+	xIndex := marginX + 4
+	// Draw Normal mode header
+	headerText := "Normal Mode"
+	headerStartX := marginX + ((modalWidth - len(headerText)) / 2)
+	for idx, char := range headerText {
+		app.screen.SetContent(headerStartX+idx, yIndex, char, nil, style)
+	}
+	yIndex += 2
+	// Draw normal mode help
+	helpTexts, exists := app.keybindHelpText[normalMode]
 	if !exists {
 		return
 	}
-
-	yIndex := marginY + 2
-	xIndex := marginX + 2
-	for key, binding := range keybinds {
-        ekey := tcell.NewEventKey(key, rune(key), tcell.ModNone)
-        var keyText string
-        if ekey.Name()[:3] == "Key" {
-            keyText = string(key)
-        } else {
-            keyText = ekey.Name()
-        }
-
-        if keyText == " " {
-            keyText = "<space>"
-        }
-
-		text := fmt.Sprintf("%s: %s [%s]", keyText, binding.name, binding.description)
-		for idx, char := range text {
+	for _, t := range helpTexts {
+		for idx, char := range t {
 			app.screen.SetContent(xIndex+idx, yIndex, char, nil, style)
 		}
 		yIndex++
+	}
+    yIndex += 1
+
+    // Draw Input Mode Header
+    headerText = "Input Mode"
+	headerStartX = marginX + ((modalWidth - len(headerText)) / 2)
+    for idx, char := range headerText  {
+        app.screen.SetContent(headerStartX+idx, yIndex, char, nil, style)
+    }
+    yIndex += 2
+
+	helpTexts, exists = app.keybindHelpText[inputMode]
+	if !exists {
+		return
+	}
+	for _, t := range helpTexts {
+		for idx, char := range t {
+			app.screen.SetContent(xIndex+idx, yIndex, char, nil, style)
+		}
+		yIndex++
+	}
+
+	bottomTextStartY := marginY + modalHeight - 1
+	bottomTextStartX := marginX + 2
+	bottomText := "'?' to view this window, `Esc` to exit this window"
+	for idx, char := range bottomText {
+		app.screen.SetContent(bottomTextStartX+idx, bottomTextStartY, char, nil, style)
 	}
 }
 
@@ -461,31 +513,33 @@ func main() {
 	defer app.screen.Fini()
 
 	// Normal mode bindings
-	app.Bind(normalMode, tcell.KeyCtrlC, "Quit", "Quit program", app.Quit)
-	app.Bind(normalMode, 'k', "Up", "Move cursor up", app.onMoveCursorUp)
-	app.Bind(normalMode, 'j', "Down", "Move cursor down", app.onMoveCursorDown)
-	app.Bind(normalMode, tcell.KeyCtrlK, "Todo Up", "Move a todo Up", app.onMoveTodoUp)
-	app.Bind(normalMode, tcell.KeyCtrlJ, "Todo Down", "Move a todo down", app.onMoveTodoDown)
-	app.Bind(normalMode, 'a', "[A]dd Todo", "Add a new todo", app.onAddTodo)
-	app.Bind(normalMode, 'e', "[E]dit Todo", "Edit a todo", app.onEditTodo)
-	app.Bind(normalMode, 'r', "[R]eplace Todo", "Replace a todo", app.onReplaceTodo)
-	app.Bind(normalMode, 'd', "[D]elete todo", "Delete a todo", app.onDeleteTodo)
-	app.Bind(normalMode, '?', "Help", "Show help modal", app.onActivateHelpMode)
-	app.Bind(normalMode, ' ', "Toggle Complete", "Toggle completion status", app.markTodoComplete)
+	app.Bind(normalMode, tcell.KeyCtrlC, "Quit", "Quit program", true, app.Quit)
+	app.Bind(normalMode, 'k', "Up", "Move cursor up", true, app.onMoveCursorUp)
+	app.Bind(normalMode, 'j', "Down", "Move cursor down", true, app.onMoveCursorDown)
+	app.Bind(normalMode, tcell.KeyCtrlK, "Todo Up", "Move a todo Up", true, app.onMoveTodoUp)
+	app.Bind(normalMode, tcell.KeyCtrlJ, "Todo Down", "Move a todo down", true, app.onMoveTodoDown)
+	app.Bind(normalMode, 'a', "[A]dd Todo", "Add a new todo", true, app.onAddTodo)
+	app.Bind(normalMode, 'e', "[E]dit Todo", "Edit a todo", true, app.onEditTodo)
+	app.Bind(normalMode, 'r', "[R]eplace Todo", "Replace a todo", true, app.onReplaceTodo)
+	app.Bind(normalMode, 'D', "[D]elete todo", "Delete a todo", true, app.onDeleteTodo)
+	app.Bind(normalMode, '?', "Help", "Show help modal", true, app.onActivateHelpMode)
+	app.Bind(normalMode, ' ', "Toggle Complete", "Toggle completion status", true, app.markTodoComplete)
+	app.Bind(normalMode, tcell.KeyCtrlU, "Jump to top", "Jump to the top of the list", true, app.onJumpToTop)
+	app.Bind(normalMode, tcell.KeyCtrlD, "Jump to bottom", "Jump to the bottom of the list", true, app.onJumpToBottom)
 
 	// Input mode bindings
-	app.Bind(inputMode, tcell.KeyCtrlC, "Quit", "Quit program", app.Quit)
-	app.Bind(inputMode, tcell.KeyEnter, "Confirm", "Confirm changes", app.onConfirmTodo)
-	app.Bind(inputMode, tcell.KeyBackspace, "Backspace", "Remove character before cursor", app.onInputBackspace)
-	app.Bind(inputMode, tcell.KeyBackspace2, "Backspace", "Remove character before cursor", app.onInputBackspace)
-	app.Bind(inputMode, tcell.KeyEscape, "Escape", "Exit input mode", app.onInputEscape)
-	app.Bind(inputMode, tcell.KeyLeft, "Left", "Move cursor left", app.onInputCursorLeft)
-	app.Bind(inputMode, tcell.KeyRight, "Right", "Move cursor right", app.onInputCursorRight)
-	app.Bind(inputMode, tcell.KeyRune, "Text", "Enter text", app.onInputRune)
+	app.Bind(inputMode, tcell.KeyCtrlC, "Quit", "Quit program", true, app.Quit)
+	app.Bind(inputMode, tcell.KeyEnter, "Confirm", "Confirm changes", true, app.onConfirmTodo)
+	app.Bind(inputMode, tcell.KeyBackspace, "Backspace", "Remove character before cursor", true, app.onInputBackspace)
+	app.Bind(inputMode, tcell.KeyBackspace2, "Backspace", "Remove character before cursor", true, app.onInputBackspace)
+	app.Bind(inputMode, tcell.KeyEscape, "Escape", "Exit input mode", true, app.onInputEscape)
+	app.Bind(inputMode, tcell.KeyLeft, "Left", "Move cursor left", true, app.onInputCursorLeft)
+	app.Bind(inputMode, tcell.KeyRight, "Right", "Move cursor right", true, app.onInputCursorRight)
+	app.Bind(inputMode, tcell.KeyRune, "Text", "Enter text", false, app.onInputRune)
 
 	// Help mode bindings
-	app.Bind(helpMode, tcell.KeyCtrlC, "Quit", "Quit program", app.Quit)
-	app.Bind(helpMode, tcell.KeyEscape, "Close", "Exit help mode", app.onExitHelpMode)
+	app.Bind(helpMode, tcell.KeyCtrlC, "Quit", "Quit program", false, app.Quit)
+	app.Bind(helpMode, tcell.KeyEscape, "Close", "Exit help mode", false, app.onExitHelpMode)
 
 	for !app.quit {
 		app.Draw()
