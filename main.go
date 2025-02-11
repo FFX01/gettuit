@@ -17,12 +17,14 @@ const (
 	normalMode mode = iota
 	inputMode
 	helpMode
+	searchMode
 )
 
 var modeMap = map[mode]string{
 	normalMode: "Normal",
 	inputMode:  "Input",
 	helpMode:   "Help",
+	searchMode: "Search",
 }
 
 var (
@@ -99,9 +101,9 @@ func (app *App) Bind(m mode, key tcell.Key, name, description string, showInHelp
 	}
 	app.keybinds[m][key] = kb
 
-    if !showInHelp {
-        return
-    }
+	if !showInHelp {
+		return
+	}
 
 	ekey := tcell.NewEventKey(key, rune(key), tcell.ModNone)
 	var keyText string
@@ -374,15 +376,10 @@ func (app *App) DrawStatus() {
 		Background(backgroundColor).
 		Foreground(foregroundColor)
 
+	drawLine(app.screen, 2, height-2, width-3, style)
+
 	statusText := " Mode: " + modeMap[app.mode]
-	for idx := 0; idx <= width; idx++ {
-		if idx < len(statusText) {
-			char := rune(statusText[idx])
-			app.screen.SetContent(idx, height-1, char, nil, style)
-		} else {
-			app.screen.SetContent(idx, height-1, ' ', nil, style)
-		}
-	}
+	drawText(app.screen, 1, height-2, style, statusText)
 }
 
 func (app *App) DrawHelpModal() {
@@ -394,63 +391,54 @@ func (app *App) DrawHelpModal() {
 
 	style := tcell.StyleDefault.Background(backgroundColor)
 
-	for yIndex := marginY + 1; yIndex <= marginY+modalHeight; yIndex++ {
-		for xIndex := marginX + 1; xIndex <= marginX+modalWidth; xIndex++ {
-			app.screen.SetContent(xIndex, yIndex, ' ', nil, style)
-		}
-	}
+	drawBox(app.screen, marginX, marginY, modalWidth, modalHeight, style)
 
-	yIndex := marginY + 2
+	yIndex := marginY + 1
 	xIndex := marginX + 4
+
 	// Draw Normal mode header
 	headerText := "Normal Mode"
 	headerStartX := marginX + ((modalWidth - len(headerText)) / 2)
-	for idx, char := range headerText {
-		app.screen.SetContent(headerStartX+idx, yIndex, char, nil, style)
-	}
+	drawText(app.screen, headerStartX, yIndex, style, headerText)
 	yIndex += 2
+
 	// Draw normal mode help
 	helpTexts, exists := app.keybindHelpText[normalMode]
 	if !exists {
 		return
 	}
 	for _, t := range helpTexts {
-		for idx, char := range t {
-			app.screen.SetContent(xIndex+idx, yIndex, char, nil, style)
-		}
+		drawText(app.screen, xIndex, yIndex, style, t)
 		yIndex++
 	}
-    yIndex += 1
+	yIndex += 2
 
-    // Draw Input Mode Header
-    headerText = "Input Mode"
+	// Draw Input Mode Header
+	headerText = "Input Mode"
 	headerStartX = marginX + ((modalWidth - len(headerText)) / 2)
-    for idx, char := range headerText  {
-        app.screen.SetContent(headerStartX+idx, yIndex, char, nil, style)
-    }
-    yIndex += 2
+	drawText(app.screen, headerStartX, yIndex, style, headerText)
+	yIndex += 2
 
 	helpTexts, exists = app.keybindHelpText[inputMode]
 	if !exists {
 		return
 	}
 	for _, t := range helpTexts {
-		for idx, char := range t {
-			app.screen.SetContent(xIndex+idx, yIndex, char, nil, style)
-		}
+		drawText(app.screen, xIndex, yIndex, style, t)
 		yIndex++
 	}
 
-	bottomTextStartY := marginY + modalHeight - 1
-	bottomTextStartX := marginX + 2
+	bottomTextStartY := marginY + modalHeight - 2
+	bottomTextStartX := marginX + 4
 	bottomText := "'?' to view this window, `Esc` to exit this window"
-	for idx, char := range bottomText {
-		app.screen.SetContent(bottomTextStartX+idx, bottomTextStartY, char, nil, style)
-	}
+	drawText(app.screen, bottomTextStartX, bottomTextStartY, style, bottomText)
 }
 
 func (app *App) Draw() {
 	app.screen.Clear()
+	width, height := app.screen.Size()
+	appStyle := tcell.StyleDefault
+	drawBox(app.screen, 0, 0, width-1, height-1, appStyle)
 
 	drawText(app.screen, 0, 0, tcell.StyleDefault, "Todo List, 'Ctrl+c' to quit, press '?' for help")
 
@@ -473,10 +461,10 @@ func (app *App) Draw() {
 		} else {
 			text = fmt.Sprintf("%s %s", prefix, todo.text)
 		}
-		drawText(app.screen, 0, idx+2, style, text)
+		drawText(app.screen, 2, idx+2, style, text)
 
 		if app.mode == inputMode && todo.temp {
-			app.screen.ShowCursor(app.cursorX+len(prefix)+1, app.cursorY+2)
+			app.screen.ShowCursor(app.cursorX+len(prefix)+3, app.cursorY+2)
 		}
 	}
 
@@ -505,6 +493,38 @@ type TodoDataSchema struct {
 func drawText(screen tcell.Screen, x, y int, style tcell.Style, text string) {
 	for idx, r := range text {
 		screen.SetContent(x+idx, y, r, nil, style)
+	}
+}
+
+func drawBox(screen tcell.Screen, x, y, width, height int, style tcell.Style) {
+	x2 := x + width
+	y2 := y + height
+	for yidx := y; yidx < y2; yidx++ {
+		for xidx := x; xidx < x2; xidx++ {
+			screen.SetContent(xidx, yidx, ' ', nil, style)
+		}
+	}
+
+	for col := x; col < x2; col++ {
+		screen.SetContent(col, y, tcell.RuneHLine, nil, style)
+		screen.SetContent(col, y+height, tcell.RuneHLine, nil, style)
+	}
+	for row := y; row < y+height; row++ {
+		screen.SetContent(x, row, tcell.RuneVLine, nil, style)
+		screen.SetContent(x+width, row, tcell.RuneVLine, nil, style)
+	}
+
+	screen.SetContent(x, y, tcell.RuneULCorner, nil, style)
+	screen.SetContent(x+width, y, tcell.RuneURCorner, nil, style)
+	screen.SetContent(x, y+height, tcell.RuneLLCorner, nil, style)
+	screen.SetContent(x+width, y+height, tcell.RuneLRCorner, nil, style)
+}
+
+func drawLine(screen tcell.Screen, x, y, width int, style tcell.Style) {
+	x2 := x + width
+
+	for xidx := x; xidx < x2; xidx++ {
+		screen.SetContent(xidx, y, ' ', nil, style)
 	}
 }
 
