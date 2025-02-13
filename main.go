@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"log/slog"
@@ -38,8 +39,20 @@ type Keybind struct {
 	callback    func(*tcell.EventKey)
 }
 
+type State struct {
+	todos []Todo
+}
+
+func NewState() *State {
+	s := State{
+		todos: []Todo{},
+	}
+	return &s
+}
+
 type App struct {
 	screen          tcell.Screen
+	state           *State
 	todos           []Todo
 	cursorY         int
 	cursorX         int
@@ -48,6 +61,227 @@ type App struct {
 	quit            bool
 	keybinds        map[mode]map[tcell.Key]Keybind
 	keybindHelpText map[mode][]string
+	focusedView     string
+	views           []*View
+}
+
+func (app *App) AddView(v *View) {
+	v.app = app
+	app.views = append(app.views, v)
+}
+
+func (app *App) Focus(viewName string) {
+	app.focusedView = viewName
+}
+
+func (app *App) GetFocusedView() (*View, error) {
+	for _, v := range app.views {
+		if v.name == app.focusedView {
+			return v, nil
+		}
+	}
+	return nil, errors.New("View not found")
+}
+
+type Keybind2 struct {
+	name        string
+	description string
+	key         tcell.Key
+	mode        mode
+	callback    func(*View, *State)
+}
+
+type cell struct {
+	x, y  int
+	char  rune
+	style tcell.Style
+}
+
+type View struct {
+	name             string
+	app              *App
+	mode             mode
+	keybinds         []Keybind2
+	x, y             int
+	w, h             int
+	cells            []cell
+	renderFunc       func(*View, *State)
+	cursorx, cursory int
+	border           bool
+	paddingt         int
+	paddingr         int
+	paddingb         int
+	paddingl         int
+}
+
+func (v *View) SetPadding(t, r, b, l int) {
+    v.paddingt = t
+    v.paddingr = r
+    v.paddingb = b
+    v.paddingl = l
+}
+
+func (v *View) getKeybind(m mode, key tcell.Key) (Keybind2, error) {
+	for _, kb := range v.keybinds {
+		if kb.mode == m && kb.key == key {
+			return kb, errors.New("Keybind does not exist")
+		}
+	}
+	return Keybind2{}, nil
+}
+
+func (v *View) handleEvent(ev tcell.Event) {
+	switch ev := ev.(type) {
+	case *tcell.EventKey:
+		var key tcell.Key
+		if ev.Key() == tcell.KeyRune {
+			key = tcell.Key(ev.Rune())
+		} else {
+			key = ev.Key()
+		}
+		kb, err := v.getKeybind(v.mode, key)
+		if err != nil {
+			kb.callback(v, v.app.state)
+		}
+	}
+}
+
+func (v *View) Bind(mode mode, key tcell.Key, name, description string, cb func(*View, *State)) {
+	kb := Keybind2{
+		name:        name,
+		description: description,
+		key:         key,
+		callback:    cb,
+	}
+	v.keybinds = append(v.keybinds, kb)
+}
+
+func NewView(name string, x, y, w, h int, renderFunc func(*View, *State)) *View {
+	v := View{
+		name:       name,
+		mode:       normalMode,
+		x:          x,
+		y:          y,
+		w:          w,
+		h:          h,
+		cells:      make([]cell, 0),
+		renderFunc: renderFunc,
+		border:     true,
+	}
+
+	return &v
+}
+
+func (v *View) getInnerBounds() (x1, y1, x2, y2 int) {
+	x1 = v.x + 1 + v.paddingl
+	y1 = v.y + 1 + v.paddingt
+	x2 = v.x + v.w - 3 - v.paddingr
+	y2 = v.y + v.h - 3 - v.paddingb
+	return x1, y1, x2, y2
+}
+
+func (v *View) getOuterBounds() (x1, y1, x2, y2 int) {
+	x1 = v.x
+	y1 = v.y
+	x2 = v.x + v.w - 2
+	y2 = v.y + v.h - 2
+	return x1, y1, x2, y2
+}
+
+func (v *View) SetContent(x, y int, r rune, style tcell.Style) {
+	if x < 0 || x > v.w-1 {
+		return
+	}
+	if y < 0 || y > v.h-1 {
+		return
+	}
+
+	v.cells = append(v.cells, cell{x: x, y: y, char: r, style: style})
+}
+
+func (v *View) Clear() {
+    v.cells = []cell{}
+}
+
+func (v *View) Draw(screen tcell.Screen) {
+	x1, y1, _, _ := v.getInnerBounds()
+
+	if v.border && v.h > 2 {
+		bx1, by1, bx2, by2 := v.getOuterBounds()
+
+		screen.SetContent(bx1, by1, tcell.RuneULCorner, nil, tcell.StyleDefault)
+		screen.SetContent(bx2, by1, tcell.RuneURCorner, nil, tcell.StyleDefault)
+		screen.SetContent(bx1, by2, tcell.RuneLLCorner, nil, tcell.StyleDefault)
+		screen.SetContent(bx2, by2, tcell.RuneLRCorner, nil, tcell.StyleDefault)
+
+		for xidx := bx1 + 1; xidx < bx2; xidx++ {
+			screen.SetContent(xidx, by1, tcell.RuneHLine, nil, tcell.StyleDefault)
+			screen.SetContent(xidx, by2, tcell.RuneHLine, nil, tcell.StyleDefault)
+		}
+		for yidx := by1 + 1; yidx < by2; yidx++ {
+			screen.SetContent(bx1, yidx, tcell.RuneVLine, nil, tcell.StyleDefault)
+			screen.SetContent(bx2, yidx, tcell.RuneVLine, nil, tcell.StyleDefault)
+		}
+	}
+
+	for _, cell := range v.cells {
+		x := x1 + cell.x
+		y := y1 + cell.y
+		screen.SetContent(x, y, cell.char, nil, cell.style)
+	}
+}
+
+func renderTitle(v *View, state *State) {
+	text := " Todo List, 'Ctrl+c' to quit, press '?' for help "
+	for idx, r := range text {
+		v.SetContent(idx, 0, r, tcell.StyleDefault)
+	}
+}
+
+func renderTodos(v *View, state *State) {
+	for idx, todo := range state.todos {
+		style := tcell.StyleDefault
+		prefix := "[ ]"
+		if todo.complete {
+			prefix = "[x]"
+		} else if todo.temp {
+			prefix = "#>"
+		}
+
+		if idx == v.cursory {
+			style = style.Background(tcell.ColorGray)
+		}
+
+		var text string
+		if todo.temp {
+			text = fmt.Sprintf("%s %s", prefix, todo.tempText)
+		} else {
+			text = fmt.Sprintf("%s %s", prefix, todo.text)
+		}
+
+		for tidx, r := range text {
+			v.SetContent(tidx, idx, r, style)
+		}
+
+		// if app.mode == inputMode && todo.temp {
+		// 	app.screen.ShowCursor(app.cursorX+len(prefix)+3, app.cursorY+2)
+		// }
+	}
+}
+
+func renderStatusLine(v *View, _ *State) {
+	style := tcell.StyleDefault.
+		Background(backgroundColor).
+		Foreground(foregroundColor)
+
+	for xidx := 0; xidx < v.w; xidx++ {
+		v.SetContent(xidx, 0, ' ', style)
+	}
+
+	statusText := " Mode: " + modeMap[v.mode]
+	for xidx, r := range statusText {
+		v.SetContent(xidx, 0, r, style)
+	}
 }
 
 type DataSchema struct {
@@ -67,8 +301,11 @@ func NewApp() *App {
 		os.Exit(1)
 	}
 
+	state := NewState()
+
 	app := App{
 		screen: screen,
+		state:  state,
 		todos: []Todo{
 			{text: "Example todo 1"},
 			{text: "Example todo 2"},
@@ -152,6 +389,7 @@ func (app *App) loadFromDisk() error {
 		newTodos = append(newTodos, t)
 	}
 	app.todos = newTodos
+	app.state.todos = newTodos
 
 	return nil
 }
@@ -291,6 +529,13 @@ func (app *App) onMoveTodoDown(_ *tcell.EventKey) {
 	}
 }
 
+func onTodoListMoveTodoDown(v *View, s *State) {
+    if v.cursory < len(s.todos) - 1 {
+        s.todos[v.cursory], s.todos[v.cursory+1] = s.todos[v.cursory+1], s.todos[v.cursory]
+        v.cursory++
+    }
+}
+
 func (app *App) onMoveCursorUp(_ *tcell.EventKey) {
 	if app.cursorY > 0 {
 		app.cursorY--
@@ -345,6 +590,12 @@ func (app *App) onInputRune(ev *tcell.EventKey) {
 }
 
 func (app *App) handleEvent(ev tcell.Event) {
+	focusedView, err := app.GetFocusedView()
+	if err == nil {
+		focusedView.handleEvent(ev)
+		return
+	}
+
 	switch ev := ev.(type) {
 	case *tcell.EventKey:
 		modeMap, exists := app.keybinds[app.mode]
@@ -440,7 +691,11 @@ func (app *App) Draw() {
 	appStyle := tcell.StyleDefault
 	drawBox(app.screen, 0, 0, width-1, height-1, appStyle)
 
-	drawText(app.screen, 0, 0, tcell.StyleDefault, "Todo List, 'Ctrl+c' to quit, press '?' for help")
+	drawText(app.screen, 1, 0, tcell.StyleDefault, " Todo List, 'Ctrl+c' to quit, press '?' for help ")
+
+	v := NewView("Todo List", 1, 1, width, height-2, renderTodos)
+	app.AddView(v)
+	app.Focus("Todo List")
 
 	for idx, todo := range app.todos {
 		style := tcell.StyleDefault
@@ -461,17 +716,33 @@ func (app *App) Draw() {
 		} else {
 			text = fmt.Sprintf("%s %s", prefix, todo.text)
 		}
-		drawText(app.screen, 2, idx+2, style, text)
+		// drawText(app.screen, 2, idx+2, style, text)
+		for tidx, r := range text {
+			v.SetContent(tidx, idx, r, style)
+		}
 
 		if app.mode == inputMode && todo.temp {
 			app.screen.ShowCursor(app.cursorX+len(prefix)+3, app.cursorY+2)
 		}
 	}
 
+	v.Draw(app.screen)
+
 	app.DrawStatus()
 
 	if app.mode == helpMode {
 		app.DrawHelpModal()
+	}
+
+	app.screen.Show()
+}
+
+func (app *App) Draw2() {
+	app.screen.Clear()
+	for _, v := range app.views {
+        v.Clear()
+		v.renderFunc(v, app.state)
+		v.Draw(app.screen)
 	}
 
 	app.screen.Show()
@@ -528,6 +799,16 @@ func drawLine(screen tcell.Screen, x, y, width int, style tcell.Style) {
 	}
 }
 
+func onTodoListCursorDown(v *View, s *State) {
+	if v.cursory < len(s.todos)-1 {
+		v.cursory++
+	}
+}
+
+func onTodoListQuit(v *View, s *State) {
+	v.app.quit = true
+}
+
 func main() {
 	app := NewApp()
 	defer app.screen.Fini()
@@ -551,8 +832,8 @@ func main() {
 	app.Bind(inputMode, tcell.KeyCtrlC, "Quit", "Quit program", true, app.Quit)
 	app.Bind(inputMode, tcell.KeyEnter, "Confirm", "Confirm changes", true, app.onConfirmTodo)
 	app.Bind(inputMode, tcell.KeyBackspace, "Backspace", "Remove character before cursor", true, app.onInputBackspace)
-	app.Bind(inputMode, tcell.KeyBackspace2, "Backspace", "Remove character before cursor", true, app.onInputBackspace)
-	app.Bind(inputMode, tcell.KeyEscape, "Escape", "Exit input mode", true, app.onInputEscape)
+	app.Bind(inputMode, tcell.KeyBackspace2, "Backspace", "Remove character before cursor", false, app.onInputBackspace)
+	app.Bind(inputMode, tcell.KeyEscape, "Exit", "Exit input mode", true, app.onInputEscape)
 	app.Bind(inputMode, tcell.KeyLeft, "Left", "Move cursor left", true, app.onInputCursorLeft)
 	app.Bind(inputMode, tcell.KeyRight, "Right", "Move cursor right", true, app.onInputCursorRight)
 	app.Bind(inputMode, tcell.KeyRune, "Text", "Enter text", false, app.onInputRune)
@@ -561,8 +842,27 @@ func main() {
 	app.Bind(helpMode, tcell.KeyCtrlC, "Quit", "Quit program", false, app.Quit)
 	app.Bind(helpMode, tcell.KeyEscape, "Close", "Exit help mode", false, app.onExitHelpMode)
 
+	width, height := app.screen.Size()
+
+	list := NewView("Todo List", 1, 2, width, height-2, renderTodos)
+    list.SetPadding(1, 1, 2, 1)
+	list.Bind(normalMode, 'j', "Down", "Move cursor down", onTodoListCursorDown)
+	list.Bind(normalMode, tcell.KeyCtrlC, "Quit", "Quit program", onTodoListQuit)
+	list.Bind(normalMode, tcell.KeyCtrlJ, "Move Down", "Move item down", onTodoListMoveTodoDown)
+
+	title := NewView("Title", 0, 0, width, 1, renderTitle)
+
+	statusLine := NewView("Status Line", 0, height-2, width, 1, renderStatusLine)
+
+	app.AddView(title)
+	app.AddView(list)
+	app.AddView(statusLine)
+
+	app.Focus("Todo List")
+
 	for !app.quit {
-		app.Draw()
+		// app.Draw()
+		app.Draw2()
 		app.handleEvent(app.screen.PollEvent())
 	}
 }
