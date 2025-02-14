@@ -25,19 +25,19 @@ type App struct {
 }
 
 func (app *App) Write(p []byte) (n int, err error) {
-    n = len(p)
-    app.logs = append(app.logs, string(p))
-    return n, nil
+	n = len(p)
+	app.logs = append(app.logs, string(p))
+	return n, nil
 }
 
 func (app *App) PopLog() string {
-    if len(app.logs) < 1 {
-        return ""
-    }
+	if len(app.logs) < 1 {
+		return ""
+	}
 
-    v := app.logs[0]
-    app.logs = app.logs[1:]
-    return v
+	v := app.logs[0]
+	app.logs = app.logs[1:]
+	return v
 }
 
 type View struct {
@@ -56,6 +56,7 @@ type View struct {
 	paddingb         int
 	paddingl         int
 	inputBuffer      []rune
+	InputCursor      int
 	fillColor        tcell.Color
 }
 
@@ -184,14 +185,14 @@ func (v *View) getInnerBounds() (x1, y1, x2, y2 int) {
 	x2 = v.x + v.w - 2 - v.paddingr
 	y2 = v.y + v.h - 2 - v.paddingb
 
-    if v.h == 1 {
-        y1 = v.y
-        y2 = v.y
-    }
-    if v.w == 1 {
-        x1 = v.x
-        x2 = v.x
-    }
+	if v.h == 1 {
+		y1 = v.y
+		y2 = v.y
+	}
+	if v.w == 1 {
+		x1 = v.x
+		x2 = v.x
+	}
 
 	return x1, y1, x2, y2
 }
@@ -272,6 +273,7 @@ func (v *View) handleEvent(ev tcell.Event) {
 		if ev.Key() == tcell.KeyRune {
 			if v.Mode == InputMode {
 				v.inputBuffer = append(v.inputBuffer, ev.Rune())
+				v.InputCursor++
 				return
 			}
 			key = tcell.Key(ev.Rune())
@@ -328,6 +330,7 @@ func (v *View) SetInputBuffer(runes []rune) {
 
 func (v *View) ClearInputBuffer() {
 	v.inputBuffer = []rune{}
+	v.InputCursor = 0
 }
 
 func (v *View) SetFillColor(color tcell.Color) {
