@@ -112,7 +112,7 @@ func (m *Model) renderTodos(v *gotuit.View) {
 		}
 
 		if v.Mode == gotuit.InputMode && todo.temp {
-			v.Cursorx = len(text)
+			v.Cursorx = len(prefix) + v.InputCursor + 1
 			v.ShowCursor()
 		}
 	}
@@ -123,14 +123,14 @@ func (m *Model) renderStatusLine(v *gotuit.View) {
 		Background(backgroundColor).
 		Foreground(foregroundColor)
 
-    focusedView, err := v.App.GetFocusedView()
-    var mode string
-    if err != nil {
-        log.Println("No Focused View!")
-        mode = "Error"
-    } else {
-        mode = modeMap[focusedView.Mode]
-    }
+	focusedView, err := v.App.GetFocusedView()
+	var mode string
+	if err != nil {
+		log.Println("No Focused View!")
+		mode = "Error"
+	} else {
+		mode = modeMap[focusedView.Mode]
+	}
 
 	statusText := " Mode: " + mode
 
@@ -153,19 +153,19 @@ func (m *Model) onTodoListToggleComplete(v *gotuit.View) {
 	if err != nil {
 		log.Fatal(err)
 	}
-    log.Println("Toggle Todo")
+	log.Println("Toggle Todo")
 }
 
-// func (app *App) onJumpToTop(_ *tcell.EventKey) {
-// 	app.cursorY = 0
-// }
+func (m *Model) onTodoListJumpToTop(v *gotuit.View) {
+    v.Cursory = 0
+}
 
-// func (app *App) onJumpToBottom(_ *tcell.EventKey) {
-// 	app.cursorY = len(app.todos) - 1
-// }
+func (m *Model) onTodoListJumpToBottom(v *gotuit.View) {
+    v.Cursory = len(m.todos) - 1
+}
 
 func (m *Model) onTodoListAddTodo(v *gotuit.View) {
-    log.Println("Adding todo...")
+	log.Println("Adding todo...")
 	v.Mode = gotuit.InputMode
 	t := Todo{temp: true}
 
@@ -196,38 +196,36 @@ func (m *Model) onTodoListAddTodo(v *gotuit.View) {
 // 	app.screen.HideCursor()
 // }
 
-// func (app *App) onEditTodo(_ *tcell.EventKey) {
-// 	app.mode = gotuit.InputMode
-// 	app.helpMode = gotuit.InputMode
-// 	app.todos[app.cursorY].temp = true
-// 	app.todos[app.cursorY].tempText = app.todos[app.cursorY].text
-// 	app.cursorX = len(app.todos[app.cursorY].text)
-// }
+func (m *Model) onTodoListEditTodo(v *gotuit.View) {
+    v.Mode = gotuit.InputMode
+    m.todos[v.Cursory].temp = true
+    textAsRunes := []rune(m.todos[v.Cursory].text)
+    v.SetInputBuffer(textAsRunes)
+}
 
-// func (app *App) onReplaceTodo(_ *tcell.EventKey) {
-// 	app.mode = gotuit.InputMode
-// 	app.helpMode = gotuit.InputMode
-// 	app.todos[app.cursorY].temp = true
-// 	app.todos[app.cursorY].tempText = ""
-// }
-
+func (m *Model) onTodoListReplaceTodo(v *gotuit.View) {
+    v.Mode = gotuit.InputMode
+    m.todos[v.Cursory].temp = true
+    v.ClearInputBuffer()
+}
 // func (app *App) onExitHelpMode(_ *tcell.EventKey) {
 // 	app.mode = gotuit.NormalMode
 // 	app.helpMode = gotuit.NormalMode
 // }
 
-// func (app *App) onDeleteTodo(_ *tcell.EventKey) {
-// 	newTodos := make([]Todo, 0)
-// 	newTodos = append(newTodos, app.todos[:app.cursorY]...)
-// 	newTodos = append(newTodos, app.todos[app.cursorY+1:]...)
-// 	app.todos = newTodos
-// 	if app.cursorY > 0 {
-// 		app.cursorY--
-// 	} else {
-// 		app.cursorY = 0
-// 	}
-// 	app.SaveToDisk()
-// }
+func (m *Model) onTodoListDeleteTodo(v *gotuit.View) {
+	newTodos := make([]Todo, 0)
+	newTodos = append(newTodos, m.todos[:v.Cursory]...)
+	newTodos = append(newTodos, m.todos[v.Cursory+1:]...)
+	m.todos = newTodos
+
+	if v.Cursory > 0 {
+		v.Cursory--
+	} else {
+		v.Cursory = 0
+	}
+	m.SaveToDisk()
+}
 
 func (m *Model) onTodoListConfirmTodo(v *gotuit.View) {
 	m.todos[v.Cursory].text = string(v.GetInputBuffer())
@@ -235,6 +233,7 @@ func (m *Model) onTodoListConfirmTodo(v *gotuit.View) {
 	v.Mode = gotuit.NormalMode
 	v.Cursorx = 0
 	v.HideCursor()
+    v.ClearInputBuffer()
 	m.SaveToDisk()
 }
 
@@ -254,19 +253,21 @@ func (m *Model) onTodoListMoveTodoUp(v *gotuit.View) {
 	}
 }
 
-// func (app *App) onInputBackspace(_ *tcell.EventKey) {
-// 	todo := app.todos[app.cursorY]
-// 	if app.cursorX > 0 {
-// 		head := todo.tempText[:app.cursorX-1]
-// 		var tail string
-// 		if app.cursorX < len(todo.tempText) {
-// 			tail = todo.tempText[app.cursorX:]
-// 		}
-// 		todo.tempText = head + tail
-// 		app.cursorX--
-// 		app.todos[app.cursorY] = todo
-// 	}
-// }
+func (m *Model) onTodoListInputBackspace(v *gotuit.View) {
+    text := v.GetInputBuffer()
+    log.Println("Cursor x: ", v.InputCursor)
+
+    if v.InputCursor > 0 {
+        head := text[:v.InputCursor-1]
+        var tail []rune
+        if v.InputCursor < len(text) {
+            tail = text[v.InputCursor:]
+        }
+        text = append(head, tail...)
+        v.SetInputBuffer(text)
+        v.InputCursor--
+    }
+}
 
 // func (app *App) onInputCursorLeft(_ *tcell.EventKey) {
 // 	if app.cursorX > 0 {
@@ -435,18 +436,11 @@ func main() {
 	log.SetOutput(app)
 
 	// Normal mode bindings
-	// app.Bind(normalMode, 'e', "[E]dit Todo", "Edit a todo", true, app.onEditTodo)
-	// app.Bind(normalMode, 'r', "[R]eplace Todo", "Replace a todo", true, app.onReplaceTodo)
-	// app.Bind(normalMode, 'D', "[D]elete todo", "Delete a todo", true, app.onDeleteTodo)
 	// app.Bind(normalMode, '?', "Help", "Show help modal", true, app.onActivateHelpMode)
-	// app.Bind(normalMode, tcell.KeyCtrlU, "Jump to top", "Jump to the top of the list", true, app.onJumpToTop)
-	// app.Bind(normalMode, tcell.KeyCtrlD, "Jump to bottom", "Jump to the bottom of the list", true, app.onJumpToBottom)
 
 	// Input mode bindings
 	// app.Bind(inputMode, tcell.KeyCtrlC, "Quit", "Quit program", true, app.Quit)
 	// app.Bind(inputMode, tcell.KeyEnter, "Confirm", "Confirm changes", true, app.onConfirmTodo)
-	// app.Bind(inputMode, tcell.KeyBackspace, "Backspace", "Remove character before cursor", true, app.onInputBackspace)
-	// app.Bind(inputMode, tcell.KeyBackspace2, "Backspace", "Remove character before cursor", false, app.onInputBackspace)
 	// app.Bind(inputMode, tcell.KeyEscape, "Exit", "Exit input mode", true, app.onInputEscape)
 	// app.Bind(inputMode, tcell.KeyLeft, "Left", "Move cursor left", true, app.onInputCursorLeft)
 	// app.Bind(inputMode, tcell.KeyRight, "Right", "Move cursor right", true, app.onInputCursorRight)
@@ -457,7 +451,7 @@ func main() {
 
 	width, height := app.Size()
 
-	list := gotuit.NewView("Todo List", 0, 2, width, height-5, model.renderTodos)
+	list := gotuit.NewView("Todo List", 0, 1, width, height-4, model.renderTodos)
 	list.SetPadding(1, 1, 2, 1)
 	list.Bind(gotuit.NormalMode, 'k', "Up", "Move cursor up", model.onTodoListCursorUp)
 	list.Bind(gotuit.NormalMode, 'j', "Down", "Move cursor down", model.onTodoListCursorDown)
@@ -467,12 +461,19 @@ func main() {
 	list.Bind(gotuit.NormalMode, tcell.KeyCtrlJ, "Move Down", "Move item down", model.onTodoListMoveTodoDown)
 	list.Bind(gotuit.NormalMode, ' ', "Toggle Complete", "Toggle completion status", model.onTodoListToggleComplete)
 	list.Bind(gotuit.NormalMode, 'a', "[A]dd Todo", "Add a new todo", model.onTodoListAddTodo)
+	list.Bind(gotuit.NormalMode, 'D', "[D]elete Todo", "Delete todo on cursor", model.onTodoListDeleteTodo)
+    list.Bind(gotuit.NormalMode, 'e', "[E]dit Todo", "Edit todo on cursor", model.onTodoListEditTodo)
+    list.Bind(gotuit.NormalMode, 'r', "[R]eplace Todo", "Replace todo with a new one", model.onTodoListReplaceTodo)
+    list.Bind(gotuit.NormalMode, tcell.KeyCtrlU, "Jump to top", "Jump to to top of list", model.onTodoListJumpToTop)
+    list.Bind(gotuit.NormalMode, tcell.KeyCtrlD, "Jump to bottom", "Jump to to bottom of list", model.onTodoListJumpToBottom)
 	list.Bind(gotuit.InputMode, tcell.KeyEnter, "Confirm", "Confirm changes", model.onTodoListConfirmTodo)
+    list.Bind(gotuit.InputMode, tcell.KeyBackspace, "Backspace", "Backspace", model.onTodoListInputBackspace)
+    list.Bind(gotuit.InputMode, tcell.KeyBackspace2, "Backspace", "Backspace", model.onTodoListInputBackspace)
 
 	title := gotuit.NewView("Title", 0, 0, width, 1, model.renderTitle)
 
 	statusLine := gotuit.NewView("Status Line", 0, height-3, width, 3, model.renderStatusLine)
-    statusLine.SetFillColor(backgroundColor)
+	statusLine.SetFillColor(backgroundColor)
 
 	app.AddView(title)
 	app.AddView(list)
