@@ -22,7 +22,8 @@ var (
 )
 
 type Model struct {
-	todos []Todo
+	todos             []Todo
+	helpModalViewName string
 }
 
 func (m *Model) loadFromDisk() error {
@@ -80,9 +81,39 @@ func (m *Model) Init() {
 }
 
 func (m *Model) renderTitle(v *gotuit.View) {
-	text := " Todo List, 'Ctrl+c' to quit, press '?' for help "
+	text := " Todo List, 'Ctrl+c' to quit, press 'F1' for help "
 	for idx, r := range text {
 		v.SetContent(idx, 0, r, tcell.StyleDefault)
+	}
+}
+
+func (m *Model) renderHelpModal(v *gotuit.View) {
+	height := v.InnerHeight()
+
+	for xidx, r := range "`Esc` to exit help" {
+		v.SetContent(xidx, height, r, tcell.StyleDefault.Background(backgroundColor))
+	}
+
+	viewForHelp, ok := v.App.GetView(m.helpModalViewName)
+	if !ok {
+		log.Fatal("No Focused View")
+	}
+
+	description := fmt.Sprintf("Help for %s, %s mode", viewForHelp.Name, modeMap[viewForHelp.Mode])
+	for xidx, r := range description {
+		v.SetContent(xidx, 0, r, tcell.StyleDefault.Background(backgroundColor))
+	}
+
+	yidx := 0
+	for _, kb := range viewForHelp.Keybinds {
+		if kb.Mode() != viewForHelp.Mode {
+			continue
+		}
+		text := kb.String()
+		for xidx, r := range text {
+			v.SetContent(xidx, yidx+2, r, tcell.StyleDefault.Background(backgroundColor))
+		}
+		yidx++
 	}
 }
 
@@ -157,11 +188,11 @@ func (m *Model) onTodoListToggleComplete(v *gotuit.View) {
 }
 
 func (m *Model) onTodoListJumpToTop(v *gotuit.View) {
-    v.Cursory = 0
+	v.Cursory = 0
 }
 
 func (m *Model) onTodoListJumpToBottom(v *gotuit.View) {
-    v.Cursory = len(m.todos) - 1
+	v.Cursory = len(m.todos) - 1
 }
 
 func (m *Model) onTodoListAddTodo(v *gotuit.View) {
@@ -177,41 +208,33 @@ func (m *Model) onTodoListAddTodo(v *gotuit.View) {
 	}
 }
 
-// func (app *App) onInputEscape(_ *tcell.EventKey) {
-// 	todo := app.todos[app.cursorY]
-//
-// 	if todo.temp && todo.text == "" {
-// 		// handle cancel add
-// 		app.todos = slices.Delete(app.todos, app.cursorY, app.cursorY+1)
-// 	} else {
-// 		// handle cancel edit
-// 		todo.tempText = ""
-// 		todo.temp = false
-// 		app.todos[app.cursorY] = todo
-// 	}
-//
-// 	app.mode = gotuit.NormalMode
-// 	app.helpMode = gotuit.NormalMode
-// 	app.cursorX = 0
-// 	app.screen.HideCursor()
-// }
+func (m *Model) onTodoListInputEscape(v *gotuit.View) {
+	todo := m.todos[v.Cursory]
+	if todo.temp && todo.text == "" {
+		m.todos = slices.Delete(m.todos, v.Cursory, v.Cursory+1)
+	} else {
+		todo.temp = false
+		m.todos[v.Cursory] = todo
+	}
+
+	v.Mode = gotuit.NormalMode
+	v.ClearInputBuffer()
+	v.HideCursor()
+}
 
 func (m *Model) onTodoListEditTodo(v *gotuit.View) {
-    v.Mode = gotuit.InputMode
-    m.todos[v.Cursory].temp = true
-    textAsRunes := []rune(m.todos[v.Cursory].text)
-    v.SetInputBuffer(textAsRunes)
+	v.Mode = gotuit.InputMode
+	m.todos[v.Cursory].temp = true
+	textAsRunes := []rune(m.todos[v.Cursory].text)
+	v.SetInputBuffer(textAsRunes)
+	v.InputCursor = len(textAsRunes)
 }
 
 func (m *Model) onTodoListReplaceTodo(v *gotuit.View) {
-    v.Mode = gotuit.InputMode
-    m.todos[v.Cursory].temp = true
-    v.ClearInputBuffer()
+	v.Mode = gotuit.InputMode
+	m.todos[v.Cursory].temp = true
+	v.ClearInputBuffer()
 }
-// func (app *App) onExitHelpMode(_ *tcell.EventKey) {
-// 	app.mode = gotuit.NormalMode
-// 	app.helpMode = gotuit.NormalMode
-// }
 
 func (m *Model) onTodoListDeleteTodo(v *gotuit.View) {
 	newTodos := make([]Todo, 0)
@@ -233,7 +256,7 @@ func (m *Model) onTodoListConfirmTodo(v *gotuit.View) {
 	v.Mode = gotuit.NormalMode
 	v.Cursorx = 0
 	v.HideCursor()
-    v.ClearInputBuffer()
+	v.ClearInputBuffer()
 	m.SaveToDisk()
 }
 
@@ -254,60 +277,33 @@ func (m *Model) onTodoListMoveTodoUp(v *gotuit.View) {
 }
 
 func (m *Model) onTodoListInputBackspace(v *gotuit.View) {
-    text := v.GetInputBuffer()
-    log.Println("Cursor x: ", v.InputCursor)
+	text := v.GetInputBuffer()
+	log.Println("Cursor x: ", v.InputCursor)
 
-    if v.InputCursor > 0 {
-        head := text[:v.InputCursor-1]
-        var tail []rune
-        if v.InputCursor < len(text) {
-            tail = text[v.InputCursor:]
-        }
-        text = append(head, tail...)
-        v.SetInputBuffer(text)
-        v.InputCursor--
-    }
+	if v.InputCursor > 0 {
+		head := text[:v.InputCursor-1]
+		var tail []rune
+		if v.InputCursor < len(text) {
+			tail = text[v.InputCursor:]
+		}
+		text = append(head, tail...)
+		v.SetInputBuffer(text)
+		v.InputCursor--
+	}
 }
 
-// func (app *App) onInputCursorLeft(_ *tcell.EventKey) {
-// 	if app.cursorX > 0 {
-// 		app.cursorX--
-// 	}
-// }
+func (m *Model) onTodoListInputLeft(v *gotuit.View) {
+	if v.InputCursor > 0 {
+		v.InputCursor--
+	}
+}
 
-// func (app *App) onInputCursorRight(_ *tcell.EventKey) {
-// 	lineLen := len(app.todos[app.cursorY].tempText)
-// 	if app.cursorX < lineLen {
-// 		app.cursorX++
-// 	}
-// }
-
-// func (app *App) onInputRune(ev *tcell.EventKey) {
-// 	if ev.Rune() != 0 {
-// 		if app.cursorX == len(app.todos[app.cursorY].tempText) {
-// 			app.todos[app.cursorY].tempText += string(ev.Rune())
-// 		} else {
-// 			head := app.todos[app.cursorY].tempText[:app.cursorX]
-// 			tail := app.todos[app.cursorY].tempText[app.cursorX:]
-// 			newText := head + string(ev.Rune()) + tail
-// 			app.todos[app.cursorY].tempText = newText
-// 		}
-// 		app.cursorX++
-// 	}
-// }
-
-// func (app *App) DrawStatus() {
-// 	width, height := app.screen.Size()
-//
-// 	style := tcell.StyleDefault.
-// 		Background(backgroundColor).
-// 		Foreground(foregroundColor)
-//
-// 	drawLine(app.screen, 2, height-2, width-3, style)
-//
-// 	statusText := " Mode: " + modeMap[app.mode]
-// 	drawText(app.screen, 1, height-2, style, statusText)
-// }
+func (m *Model) onTodoListInputRight(v *gotuit.View) {
+	lineLen := len(v.GetInputBuffer())
+	if v.InputCursor < lineLen {
+		v.InputCursor++
+	}
+}
 
 // func (app *App) DrawHelpModal() {
 // 	width, height := app.screen.Size()
@@ -423,8 +419,24 @@ func (m *Model) onTodoListCursorUp(v *gotuit.View) {
 	}
 }
 
-func onTodoListQuit(v *gotuit.View) {
-	v.App.Quit()
+func onGlobalQuit(app *gotuit.App) {
+	app.Quit()
+}
+
+func (m *Model) onGlobalShowHelp(app *gotuit.App) {
+	focusedView, err := app.GetFocusedView()
+	if err != nil {
+		m.helpModalViewName = "Todo List"
+	} else {
+		m.helpModalViewName = focusedView.Name
+	}
+	app.ShowView("Help Modal")
+	app.Focus("Help Modal")
+}
+
+func onHelpExit(v *gotuit.View) {
+	v.App.HideView("Help Modal")
+	v.App.Focus("Todo List")
 }
 
 func main() {
@@ -435,51 +447,48 @@ func main() {
 
 	log.SetOutput(app)
 
-	// Normal mode bindings
-	// app.Bind(normalMode, '?', "Help", "Show help modal", true, app.onActivateHelpMode)
-
-	// Input mode bindings
-	// app.Bind(inputMode, tcell.KeyCtrlC, "Quit", "Quit program", true, app.Quit)
-	// app.Bind(inputMode, tcell.KeyEnter, "Confirm", "Confirm changes", true, app.onConfirmTodo)
-	// app.Bind(inputMode, tcell.KeyEscape, "Exit", "Exit input mode", true, app.onInputEscape)
-	// app.Bind(inputMode, tcell.KeyLeft, "Left", "Move cursor left", true, app.onInputCursorLeft)
-	// app.Bind(inputMode, tcell.KeyRight, "Right", "Move cursor right", true, app.onInputCursorRight)
-
-	// Help mode bindings
-	// app.Bind(helpMode, tcell.KeyCtrlC, "Quit", "Quit program", false, app.Quit)
-	// app.Bind(helpMode, tcell.KeyEscape, "Close", "Exit help mode", false, app.onExitHelpMode)
-
 	width, height := app.Size()
 
 	list := gotuit.NewView("Todo List", 0, 1, width, height-4, model.renderTodos)
 	list.SetPadding(1, 1, 2, 1)
 	list.Bind(gotuit.NormalMode, 'k', "Up", "Move cursor up", model.onTodoListCursorUp)
 	list.Bind(gotuit.NormalMode, 'j', "Down", "Move cursor down", model.onTodoListCursorDown)
-	list.Bind(gotuit.NormalMode, tcell.KeyCtrlC, "Quit", "Quit program", onTodoListQuit)
-	list.Bind(gotuit.InputMode, tcell.KeyCtrlC, "Quit", "Quit program", onTodoListQuit)
 	list.Bind(gotuit.NormalMode, tcell.KeyCtrlK, "Move Up", "Move item up", model.onTodoListMoveTodoUp)
 	list.Bind(gotuit.NormalMode, tcell.KeyCtrlJ, "Move Down", "Move item down", model.onTodoListMoveTodoDown)
 	list.Bind(gotuit.NormalMode, ' ', "Toggle Complete", "Toggle completion status", model.onTodoListToggleComplete)
 	list.Bind(gotuit.NormalMode, 'a', "[A]dd Todo", "Add a new todo", model.onTodoListAddTodo)
 	list.Bind(gotuit.NormalMode, 'D', "[D]elete Todo", "Delete todo on cursor", model.onTodoListDeleteTodo)
-    list.Bind(gotuit.NormalMode, 'e', "[E]dit Todo", "Edit todo on cursor", model.onTodoListEditTodo)
-    list.Bind(gotuit.NormalMode, 'r', "[R]eplace Todo", "Replace todo with a new one", model.onTodoListReplaceTodo)
-    list.Bind(gotuit.NormalMode, tcell.KeyCtrlU, "Jump to top", "Jump to to top of list", model.onTodoListJumpToTop)
-    list.Bind(gotuit.NormalMode, tcell.KeyCtrlD, "Jump to bottom", "Jump to to bottom of list", model.onTodoListJumpToBottom)
+	list.Bind(gotuit.NormalMode, 'e', "[E]dit Todo", "Edit todo on cursor", model.onTodoListEditTodo)
+	list.Bind(gotuit.NormalMode, 'r', "[R]eplace Todo", "Replace todo with a new one", model.onTodoListReplaceTodo)
+	list.Bind(gotuit.NormalMode, tcell.KeyCtrlU, "Jump to top", "Jump to to top of list", model.onTodoListJumpToTop)
+	list.Bind(gotuit.NormalMode, tcell.KeyCtrlD, "Jump to bottom", "Jump to to bottom of list", model.onTodoListJumpToBottom)
 	list.Bind(gotuit.InputMode, tcell.KeyEnter, "Confirm", "Confirm changes", model.onTodoListConfirmTodo)
-    list.Bind(gotuit.InputMode, tcell.KeyBackspace, "Backspace", "Backspace", model.onTodoListInputBackspace)
-    list.Bind(gotuit.InputMode, tcell.KeyBackspace2, "Backspace", "Backspace", model.onTodoListInputBackspace)
+	list.Bind(gotuit.InputMode, tcell.KeyBackspace, "Backspace", "Backspace", model.onTodoListInputBackspace)
+	list.Bind(gotuit.InputMode, tcell.KeyBackspace2, "Backspace", "Backspace", model.onTodoListInputBackspace)
+	list.Bind(gotuit.InputMode, tcell.KeyLeft, "Left", "Move cursor left", model.onTodoListInputLeft)
+	list.Bind(gotuit.InputMode, tcell.KeyRight, "Right", "Move cursor right", model.onTodoListInputRight)
+	list.Bind(gotuit.InputMode, tcell.KeyEscape, "Exit", "Cancel Changes", model.onTodoListInputEscape)
 
 	title := gotuit.NewView("Title", 0, 0, width, 1, model.renderTitle)
 
 	statusLine := gotuit.NewView("Status Line", 0, height-3, width, 3, model.renderStatusLine)
 	statusLine.SetFillColor(backgroundColor)
 
+	helpModal := gotuit.NewView("Help Modal", width/4, height/4, width/2, height/2, model.renderHelpModal)
+	helpModal.SetPadding(0, 1, 0, 1)
+	helpModal.SetFillColor(backgroundColor)
+	helpModal.Hide()
+	helpModal.Bind(gotuit.NormalMode, tcell.KeyEscape, "Exit", "Exit Help", onHelpExit)
+
 	app.AddView(title)
 	app.AddView(list)
 	app.AddView(statusLine)
+	app.AddView(helpModal)
 
 	app.Focus("Todo List")
+
+	app.Bind(tcell.KeyCtrlC, "Quit", "Quit program", onGlobalQuit)
+	app.Bind(tcell.KeyF1, "Help", "Show Help", model.onGlobalShowHelp)
 
 	app.MainLoop()
 }

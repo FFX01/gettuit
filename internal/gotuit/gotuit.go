@@ -2,6 +2,7 @@ package gotuit
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"log/slog"
 	"os"
@@ -22,6 +23,7 @@ type App struct {
 	focusedView string
 	views       []*View
 	logs        []string
+	keybinds    []GlobalKeybind
 }
 
 func (app *App) Write(p []byte) (n int, err error) {
@@ -58,6 +60,7 @@ type View struct {
 	inputBuffer      []rune
 	InputCursor      int
 	fillColor        tcell.Color
+	visible          bool
 }
 
 type Keybind struct {
@@ -66,6 +69,29 @@ type Keybind struct {
 	key         tcell.Key
 	mode        Mode
 	callback    func(*View)
+}
+
+func (kb *Keybind) String() string {
+	keyString := tcell.KeyNames[kb.key]
+	if keyString == "" {
+		keyString = string(kb.key)
+	}
+	if keyString == " " {
+		keyString = "<space>"
+	}
+
+	return fmt.Sprintf("%s - %s [%s]", keyString, kb.name, kb.description)
+}
+
+func (kb *Keybind) Mode() Mode {
+	return kb.mode
+}
+
+type GlobalKeybind struct {
+	name        string
+	description string
+	key         tcell.Key
+	callback    func(*App)
 }
 
 type cell struct {
@@ -122,6 +148,15 @@ func (app *App) Focus(viewName string) {
 	app.focusedView = viewName
 }
 
+func (app *App) GetView(name string) (view *View, ok bool) {
+	for _, v := range app.views {
+		if v.Name == name {
+			return v, true
+		}
+	}
+	return nil, false
+}
+
 func (app *App) GetFocusedView() (*View, error) {
 	for _, v := range app.views {
 		if v.Name == app.focusedView {
@@ -136,23 +171,54 @@ func (app *App) Quit() {
 }
 
 func (app *App) handleEvent(ev tcell.Event) {
+	switch ev := ev.(type) {
+	case *tcell.EventKey:
+		var key tcell.Key
+		if ev.Key() == tcell.KeyRune {
+			key = tcell.Key(ev.Rune())
+		} else {
+			key = ev.Key()
+		}
+		kb, err := app.getKeybind(key)
+		if err == nil {
+			kb.callback(app)
+			return
+		}
+	}
+
 	focusedView, err := app.GetFocusedView()
 	if err == nil {
 		focusedView.handleEvent(ev)
 		return
 	}
+}
 
-	switch ev := ev.(type) {
-	case *tcell.EventKey:
-		if ev.Key() == tcell.KeyCtrlC {
-			app.Quit()
+func (app *App) ShowView(name string) error {
+	for _, v := range app.views {
+		if v.Name == name {
+			v.Show()
+			return nil
 		}
 	}
+	return errors.New("View not found")
+}
+
+func (app *App) HideView(name string) error {
+	for _, v := range app.views {
+		if v.Name == name {
+			v.Hide()
+			return nil
+		}
+	}
+	return errors.New("View not found")
 }
 
 func (app *App) Draw() {
 	app.screen.Clear()
 	for _, v := range app.views {
+		if !v.visible {
+			continue
+		}
 		v.Clear()
 		v.renderFunc(v)
 		v.Draw(app.screen)
@@ -174,6 +240,7 @@ func NewView(name string, x, y, w, h int, renderFunc func(*View)) *View {
 		border:      true,
 		inputBuffer: []rune{},
 		fillColor:   tcell.ColorDefault,
+		visible:     true,
 	}
 
 	return &v
@@ -255,6 +322,16 @@ func (v *View) Draw(screen tcell.Screen) {
 	}
 }
 
+func (app *App) Bind(key tcell.Key, name, description string, cb func(*App)) {
+	kb := GlobalKeybind{
+		name:        name,
+		description: description,
+		key:         key,
+		callback:    cb,
+	}
+	app.keybinds = append(app.keybinds, kb)
+}
+
 func (v *View) Bind(mode Mode, key tcell.Key, name, description string, cb func(*View)) {
 	kb := Keybind{
 		name:        name,
@@ -266,14 +343,24 @@ func (v *View) Bind(mode Mode, key tcell.Key, name, description string, cb func(
 	v.Keybinds = append(v.Keybinds, kb)
 }
 
+func (v *View) handleInputRune(r rune) {
+	if v.InputCursor == len(v.inputBuffer) {
+		v.inputBuffer = append(v.inputBuffer, r)
+	} else {
+		head := v.inputBuffer[:v.InputCursor]
+		tail := v.inputBuffer[v.InputCursor:]
+		v.inputBuffer = append(head, append([]rune{r}, tail...)...)
+	}
+	v.InputCursor++
+}
+
 func (v *View) handleEvent(ev tcell.Event) {
 	switch ev := ev.(type) {
 	case *tcell.EventKey:
 		var key tcell.Key
 		if ev.Key() == tcell.KeyRune {
 			if v.Mode == InputMode {
-				v.inputBuffer = append(v.inputBuffer, ev.Rune())
-				v.InputCursor++
+				v.handleInputRune(ev.Rune())
 				return
 			}
 			key = tcell.Key(ev.Rune())
@@ -281,19 +368,28 @@ func (v *View) handleEvent(ev tcell.Event) {
 			key = ev.Key()
 		}
 		kb, err := v.getKeybind(v.Mode, key)
-		if err != nil {
+		if err == nil {
 			kb.callback(v)
 		}
 	}
 }
 
+func (app *App) getKeybind(key tcell.Key) (GlobalKeybind, error) {
+	for _, kb := range app.keybinds {
+		if kb.key == key {
+			return kb, nil
+		}
+	}
+	return GlobalKeybind{}, errors.New("Keybind not found")
+}
+
 func (v *View) getKeybind(m Mode, key tcell.Key) (Keybind, error) {
 	for _, kb := range v.Keybinds {
 		if kb.mode == m && kb.key == key {
-			return kb, errors.New("Keybind does not exist")
+			return kb, nil
 		}
 	}
-	return Keybind{}, nil
+	return Keybind{}, errors.New("Keybind does not exist")
 }
 
 func (v *View) SetPadding(t, r, b, l int) {
@@ -309,6 +405,10 @@ func (v *View) Width() int {
 
 func (v *View) InnerWidth() int {
 	return v.w - v.paddingl - v.paddingr - 2
+}
+
+func (v *View) InnerHeight() int {
+	return v.h - v.paddingt - v.paddingb - 3
 }
 
 func (v *View) ShowCursor() {
@@ -335,4 +435,12 @@ func (v *View) ClearInputBuffer() {
 
 func (v *View) SetFillColor(color tcell.Color) {
 	v.fillColor = color
+}
+
+func (v *View) Show() {
+	v.visible = true
+}
+
+func (v *View) Hide() {
+	v.visible = false
 }
