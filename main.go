@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"slices"
-	"strconv"
 
 	"github.com/FFX01/gettuit/internal/gotuit"
 	"github.com/gdamore/tcell/v2"
@@ -124,14 +123,21 @@ func (m *Model) renderStatusLine(v *gotuit.View) {
 		Background(backgroundColor).
 		Foreground(foregroundColor)
 
-	width := v.InnerWidth()
+    focusedView, err := v.App.GetFocusedView()
+    var mode string
+    if err != nil {
+        log.Println("No Focused View!")
+        mode = "Error"
+    } else {
+        mode = modeMap[focusedView.Mode]
+    }
 
-	for xidx := 0; xidx < width; xidx++ {
-		v.SetContent(xidx, 0, '#', style)
+	statusText := " Mode: " + mode
+
+	logLine := v.App.PopLog()
+	if logLine != "" {
+		statusText += ", Log: " + logLine
 	}
-
-	widthStr := strconv.Itoa(width)
-	statusText := " Mode: " + modeMap[v.Mode] + ", Width: " + widthStr
 	for xidx, r := range statusText {
 		v.SetContent(xidx, 0, r, style)
 	}
@@ -147,6 +153,7 @@ func (m *Model) onTodoListToggleComplete(v *gotuit.View) {
 	if err != nil {
 		log.Fatal(err)
 	}
+    log.Println("Toggle Todo")
 }
 
 // func (app *App) onJumpToTop(_ *tcell.EventKey) {
@@ -158,6 +165,7 @@ func (m *Model) onTodoListToggleComplete(v *gotuit.View) {
 // }
 
 func (m *Model) onTodoListAddTodo(v *gotuit.View) {
+    log.Println("Adding todo...")
 	v.Mode = gotuit.InputMode
 	t := Todo{temp: true}
 
@@ -222,19 +230,19 @@ func (m *Model) onTodoListAddTodo(v *gotuit.View) {
 // }
 
 func (m *Model) onTodoListConfirmTodo(v *gotuit.View) {
-    m.todos[v.Cursory].text = string(v.GetInputBuffer())
-    m.todos[v.Cursory].temp = false
-    v.Mode = gotuit.NormalMode
-    v.Cursorx = 0
-    v.HideCursor()
-    m.SaveToDisk()
+	m.todos[v.Cursory].text = string(v.GetInputBuffer())
+	m.todos[v.Cursory].temp = false
+	v.Mode = gotuit.NormalMode
+	v.Cursorx = 0
+	v.HideCursor()
+	m.SaveToDisk()
 }
 
 func (m *Model) onTodoListMoveTodoDown(v *gotuit.View) {
 	if v.Cursory < len(m.todos)-1 {
 		m.todos[v.Cursory], m.todos[v.Cursory+1] = m.todos[v.Cursory+1], m.todos[v.Cursory]
 		v.Cursory++
-        m.SaveToDisk()
+		m.SaveToDisk()
 	}
 }
 
@@ -242,7 +250,7 @@ func (m *Model) onTodoListMoveTodoUp(v *gotuit.View) {
 	if v.Cursory > 0 {
 		m.todos[v.Cursory], m.todos[v.Cursory-1] = m.todos[v.Cursory-1], m.todos[v.Cursory]
 		v.Cursory--
-        m.SaveToDisk()
+		m.SaveToDisk()
 	}
 }
 
@@ -424,6 +432,8 @@ func main() {
 	app := gotuit.NewApp()
 	defer app.Cleanup()
 
+	log.SetOutput(app)
+
 	// Normal mode bindings
 	// app.Bind(normalMode, 'e', "[E]dit Todo", "Edit a todo", true, app.onEditTodo)
 	// app.Bind(normalMode, 'r', "[R]eplace Todo", "Replace a todo", true, app.onReplaceTodo)
@@ -447,7 +457,7 @@ func main() {
 
 	width, height := app.Size()
 
-	list := gotuit.NewView("Todo List", 0, 2, width, height-3, model.renderTodos)
+	list := gotuit.NewView("Todo List", 0, 2, width, height-5, model.renderTodos)
 	list.SetPadding(1, 1, 2, 1)
 	list.Bind(gotuit.NormalMode, 'k', "Up", "Move cursor up", model.onTodoListCursorUp)
 	list.Bind(gotuit.NormalMode, 'j', "Down", "Move cursor down", model.onTodoListCursorDown)
@@ -457,11 +467,12 @@ func main() {
 	list.Bind(gotuit.NormalMode, tcell.KeyCtrlJ, "Move Down", "Move item down", model.onTodoListMoveTodoDown)
 	list.Bind(gotuit.NormalMode, ' ', "Toggle Complete", "Toggle completion status", model.onTodoListToggleComplete)
 	list.Bind(gotuit.NormalMode, 'a', "[A]dd Todo", "Add a new todo", model.onTodoListAddTodo)
-    list.Bind(gotuit.InputMode, tcell.KeyEnter, "Confirm", "Confirm changes", model.onTodoListConfirmTodo)
+	list.Bind(gotuit.InputMode, tcell.KeyEnter, "Confirm", "Confirm changes", model.onTodoListConfirmTodo)
 
 	title := gotuit.NewView("Title", 0, 0, width, 1, model.renderTitle)
 
-	statusLine := gotuit.NewView("Status Line", 0, height-2, width, 1, model.renderStatusLine)
+	statusLine := gotuit.NewView("Status Line", 0, height-3, width, 3, model.renderStatusLine)
+    statusLine.SetFillColor(backgroundColor)
 
 	app.AddView(title)
 	app.AddView(list)

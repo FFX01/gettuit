@@ -21,6 +21,23 @@ type App struct {
 	quit        bool
 	focusedView string
 	views       []*View
+	logs        []string
+}
+
+func (app *App) Write(p []byte) (n int, err error) {
+    n = len(p)
+    app.logs = append(app.logs, string(p))
+    return n, nil
+}
+
+func (app *App) PopLog() string {
+    if len(app.logs) < 1 {
+        return ""
+    }
+
+    v := app.logs[0]
+    app.logs = app.logs[1:]
+    return v
 }
 
 type View struct {
@@ -39,6 +56,7 @@ type View struct {
 	paddingb         int
 	paddingl         int
 	inputBuffer      []rune
+	fillColor        tcell.Color
 }
 
 type Keybind struct {
@@ -154,6 +172,7 @@ func NewView(name string, x, y, w, h int, renderFunc func(*View)) *View {
 		renderFunc:  renderFunc,
 		border:      true,
 		inputBuffer: []rune{},
+		fillColor:   tcell.ColorDefault,
 	}
 
 	return &v
@@ -164,6 +183,16 @@ func (v *View) getInnerBounds() (x1, y1, x2, y2 int) {
 	y1 = v.y + 1 + v.paddingt
 	x2 = v.x + v.w - 2 - v.paddingr
 	y2 = v.y + v.h - 2 - v.paddingb
+
+    if v.h == 1 {
+        y1 = v.y
+        y2 = v.y
+    }
+    if v.w == 1 {
+        x1 = v.x
+        x2 = v.x
+    }
+
 	return x1, y1, x2, y2
 }
 
@@ -192,22 +221,29 @@ func (v *View) Clear() {
 
 func (v *View) Draw(screen tcell.Screen) {
 	x1, y1, _, _ := v.getInnerBounds()
+	bx1, by1, bx2, by2 := v.getOuterBounds()
+
+	// Draw fillColor
+	fillStyle := tcell.StyleDefault.Background(v.fillColor)
+	for yidx := by1; yidx <= by2; yidx++ {
+		for xidx := bx1; xidx <= bx2; xidx++ {
+			screen.SetContent(xidx, yidx, ' ', nil, fillStyle)
+		}
+	}
 
 	if v.border && v.h > 2 {
-		bx1, by1, bx2, by2 := v.getOuterBounds()
-
-		screen.SetContent(bx1, by1, tcell.RuneULCorner, nil, tcell.StyleDefault)
-		screen.SetContent(bx2, by1, tcell.RuneURCorner, nil, tcell.StyleDefault)
-		screen.SetContent(bx1, by2, tcell.RuneLLCorner, nil, tcell.StyleDefault)
-		screen.SetContent(bx2, by2, tcell.RuneLRCorner, nil, tcell.StyleDefault)
+		screen.SetContent(bx1, by1, tcell.RuneULCorner, nil, fillStyle)
+		screen.SetContent(bx2, by1, tcell.RuneURCorner, nil, fillStyle)
+		screen.SetContent(bx1, by2, tcell.RuneLLCorner, nil, fillStyle)
+		screen.SetContent(bx2, by2, tcell.RuneLRCorner, nil, fillStyle)
 
 		for xidx := bx1 + 1; xidx < bx2; xidx++ {
-			screen.SetContent(xidx, by1, tcell.RuneHLine, nil, tcell.StyleDefault)
-			screen.SetContent(xidx, by2, tcell.RuneHLine, nil, tcell.StyleDefault)
+			screen.SetContent(xidx, by1, tcell.RuneHLine, nil, fillStyle)
+			screen.SetContent(xidx, by2, tcell.RuneHLine, nil, fillStyle)
 		}
 		for yidx := by1 + 1; yidx < by2; yidx++ {
-			screen.SetContent(bx1, yidx, tcell.RuneVLine, nil, tcell.StyleDefault)
-			screen.SetContent(bx2, yidx, tcell.RuneVLine, nil, tcell.StyleDefault)
+			screen.SetContent(bx1, yidx, tcell.RuneVLine, nil, fillStyle)
+			screen.SetContent(bx2, yidx, tcell.RuneVLine, nil, fillStyle)
 		}
 	}
 
@@ -234,10 +270,10 @@ func (v *View) handleEvent(ev tcell.Event) {
 	case *tcell.EventKey:
 		var key tcell.Key
 		if ev.Key() == tcell.KeyRune {
-            if v.Mode == InputMode {
-                v.inputBuffer = append(v.inputBuffer, ev.Rune())
-                return
-            }
+			if v.Mode == InputMode {
+				v.inputBuffer = append(v.inputBuffer, ev.Rune())
+				return
+			}
 			key = tcell.Key(ev.Rune())
 		} else {
 			key = ev.Key()
@@ -278,19 +314,22 @@ func (v *View) ShowCursor() {
 	v.App.screen.ShowCursor(x1+v.Cursorx, y1+v.Cursory)
 }
 
-
 func (v *View) HideCursor() {
-    v.App.screen.HideCursor()
+	v.App.screen.HideCursor()
 }
 
 func (v *View) GetInputBuffer() []rune {
-    return v.inputBuffer
+	return v.inputBuffer
 }
 
 func (v *View) SetInputBuffer(runes []rune) {
-    v.inputBuffer = runes
+	v.inputBuffer = runes
 }
 
 func (v *View) ClearInputBuffer() {
-    v.inputBuffer = []rune{}
+	v.inputBuffer = []rune{}
+}
+
+func (v *View) SetFillColor(color tcell.Color) {
+	v.fillColor = color
 }
