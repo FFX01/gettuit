@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"slices"
+	"strings"
 
 	"github.com/FFX01/gettuit/internal/gotuit"
 	"github.com/gdamore/tcell/v2"
@@ -24,6 +25,17 @@ var (
 type Model struct {
 	todos             []Todo
 	helpModalViewName string
+	searchText        string
+	searchMatches     []searchMatch
+}
+
+type searchMatch struct {
+	x, y int
+	len  int
+}
+
+func (m *Model) clearsearchMatches() {
+	m.searchMatches = make([]searchMatch, 0)
 }
 
 func (m *Model) loadFromDisk() error {
@@ -78,6 +90,13 @@ func (m *Model) SaveToDisk() error {
 func (m *Model) Init() {
 	m.todos = []Todo{}
 	m.loadFromDisk()
+}
+
+func (m *Model) renderSearchLine(v *gotuit.View) {
+	prefix := "Search: "
+
+	text := prefix + string(v.GetInputBuffer())
+	v.SetTextContent(0, 0, text, tcell.StyleDefault.Background(backgroundColor))
 }
 
 func (m *Model) renderTitle(v *gotuit.View) {
@@ -136,6 +155,14 @@ func (m *Model) renderTodos(v *gotuit.View) {
 		if v.Mode == gotuit.InputMode && todo.temp {
 			v.Cursorx = len(prefix) + v.InputCursor + 1
 			v.ShowCursor()
+		}
+	}
+
+	if len(m.searchMatches) > 0 {
+		for _, sm := range m.searchMatches {
+			t := m.todos[sm.y]
+			text := t.text[sm.x : sm.x+sm.len]
+			v.SetTextContent(sm.x+4, sm.y, text, tcell.StyleDefault.Background(tcell.ColorDarkGreen))
 		}
 	}
 }
@@ -333,9 +360,98 @@ func (m *Model) onGlobalShowHelp(app *gotuit.App) {
 	app.Focus("Help Modal")
 }
 
-func onHelpExit(v *gotuit.View) {
+func (m *Model) onHelpExit(v *gotuit.View) {
 	v.App.HideView("Help Modal")
+	previousView, ok := v.App.GetView(m.helpModalViewName)
+	if !ok {
+		log.Fatal("Something went terribly wrong")
+	}
+	v.App.Focus(previousView.Name)
+}
+
+func onEnterSearchMode(v *gotuit.View) {
+	searchLine, ok := v.App.GetView("Search Line")
+	if !ok {
+		log.Fatal("View should exist, but doesn't somehow")
+	}
+	v.App.HideView("Status Line")
+	v.App.ShowView("Search Line")
+	v.App.Focus("Search Line")
+	searchLine.Mode = gotuit.InputMode
+}
+
+func onExitSearchMode(v *gotuit.View) {
+	v.ClearInputBuffer()
+	v.App.HideView("Search Line")
+	v.App.ShowView("Status Line")
 	v.App.Focus("Todo List")
+}
+
+func (m *Model) findSearchMatches(searchText string) {
+	for yidx, t := range m.todos {
+		xidx := strings.Index(t.text, searchText)
+		if xidx != -1 {
+			sm := searchMatch{
+				x:   xidx,
+				y:   yidx,
+				len: len(searchText),
+			}
+			m.searchMatches = append(m.searchMatches, sm)
+		}
+	}
+}
+
+func (m *Model) onSearchConfirm(v *gotuit.View) {
+	m.clearsearchMatches()
+	m.findSearchMatches(string(v.GetInputBuffer()))
+	v.ClearInputBuffer()
+	v.Hide()
+	v.App.ShowView("Status Line")
+	v.App.Focus("Todo List")
+	if len(m.searchMatches) > 0 {
+		list, ok := v.App.GetView("Todo List")
+		if !ok {
+			log.Fatal("This shouldn't be possible")
+		}
+		list.Cursory = m.searchMatches[0].y
+	}
+}
+
+func (m *Model) onNextSearchMatch(v *gotuit.View) {
+	if len(m.searchMatches) < 1 {
+		return
+	}
+
+	if v.Cursory == m.searchMatches[len(m.searchMatches)-1].y {
+		v.Cursory = m.searchMatches[0].y
+		return
+	}
+
+	for _, sm := range m.searchMatches {
+		if v.Cursory < sm.y {
+			v.Cursory = sm.y
+			return
+		}
+	}
+}
+
+func (m *Model) onPreviousSearchMatch(v *gotuit.View) {
+	if len(m.searchMatches) < 1 {
+		return
+	}
+
+	if v.Cursory == m.searchMatches[0].y {
+		v.Cursory = m.searchMatches[len(m.searchMatches)-1].y
+		return
+	}
+
+	for i := len(m.searchMatches) - 1; i >= 0; i-- {
+		sm := m.searchMatches[i]
+		if v.Cursory > sm.y {
+			v.Cursory = sm.y
+			return
+		}
+	}
 }
 
 func main() {
@@ -361,6 +477,9 @@ func main() {
 	list.Bind(gotuit.NormalMode, 'r', "[R]eplace Todo", "Replace todo with a new one", model.onTodoListReplaceTodo)
 	list.Bind(gotuit.NormalMode, tcell.KeyCtrlU, "Jump to top", "Jump to to top of list", model.onTodoListJumpToTop)
 	list.Bind(gotuit.NormalMode, tcell.KeyCtrlD, "Jump to bottom", "Jump to to bottom of list", model.onTodoListJumpToBottom)
+	list.Bind(gotuit.NormalMode, '/', "Search", "Enter search mode", onEnterSearchMode)
+	list.Bind(gotuit.NormalMode, 'n', "Next", "Next Search Match", model.onNextSearchMatch)
+	list.Bind(gotuit.NormalMode, 'N', "Previous", "Previous search match", model.onPreviousSearchMatch)
 	list.Bind(gotuit.InputMode, tcell.KeyEnter, "Confirm", "Confirm changes", model.onTodoListConfirmTodo)
 	list.Bind(gotuit.InputMode, tcell.KeyBackspace, "Backspace", "Backspace", model.onTodoListInputBackspace)
 	list.Bind(gotuit.InputMode, tcell.KeyBackspace2, "Backspace", "Backspace", model.onTodoListInputBackspace)
@@ -377,12 +496,19 @@ func main() {
 	helpModal.SetPadding(0, 1, 0, 1)
 	helpModal.SetFillColor(backgroundColor)
 	helpModal.Hide()
-	helpModal.Bind(gotuit.NormalMode, tcell.KeyEscape, "Exit", "Exit Help", onHelpExit)
+	helpModal.Bind(gotuit.NormalMode, tcell.KeyEscape, "Exit", "Exit Help", model.onHelpExit)
+
+	searchLine := gotuit.NewView("Search Line", 0, height-3, width, 3, model.renderSearchLine)
+	searchLine.SetFillColor(backgroundColor)
+	searchLine.Hide()
+	searchLine.Bind(gotuit.InputMode, tcell.KeyEscape, "Exit", "Exit search mode", onExitSearchMode)
+	searchLine.Bind(gotuit.InputMode, tcell.KeyEnter, "Confirm", "Confirm search", model.onSearchConfirm)
 
 	app.AddView(title)
 	app.AddView(list)
 	app.AddView(statusLine)
 	app.AddView(helpModal)
+	app.AddView(searchLine)
 
 	app.Focus("Todo List")
 
