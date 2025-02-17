@@ -82,17 +82,14 @@ func (m *Model) Init() {
 
 func (m *Model) renderTitle(v *gotuit.View) {
 	text := " Todo List, 'Ctrl+c' to quit, press 'F1' for help "
-	for idx, r := range text {
-		v.SetContent(idx, 0, r, tcell.StyleDefault)
-	}
+	v.SetTextContent(0, 0, text, tcell.StyleDefault)
 }
 
 func (m *Model) renderHelpModal(v *gotuit.View) {
 	height := v.InnerHeight()
 
-	for xidx, r := range "`Esc` to exit help" {
-		v.SetContent(xidx, height, r, tcell.StyleDefault.Background(backgroundColor))
-	}
+	exitText := "`Esc` to exit help"
+	v.SetTextContent(0, height, exitText, tcell.StyleDefault.Background(backgroundColor))
 
 	viewForHelp, ok := v.App.GetView(m.helpModalViewName)
 	if !ok {
@@ -100,9 +97,7 @@ func (m *Model) renderHelpModal(v *gotuit.View) {
 	}
 
 	description := fmt.Sprintf("Help for %s, %s mode", viewForHelp.Name, modeMap[viewForHelp.Mode])
-	for xidx, r := range description {
-		v.SetContent(xidx, 0, r, tcell.StyleDefault.Background(backgroundColor))
-	}
+	v.SetTextContent(0, 0, description, tcell.StyleDefault.Background(backgroundColor))
 
 	yidx := 0
 	for _, kb := range viewForHelp.Keybinds {
@@ -110,9 +105,7 @@ func (m *Model) renderHelpModal(v *gotuit.View) {
 			continue
 		}
 		text := kb.String()
-		for xidx, r := range text {
-			v.SetContent(xidx, yidx+2, r, tcell.StyleDefault.Background(backgroundColor))
-		}
+		v.SetTextContent(0, yidx+2, text, tcell.StyleDefault.Background(backgroundColor))
 		yidx++
 	}
 }
@@ -138,9 +131,7 @@ func (m *Model) renderTodos(v *gotuit.View) {
 			text = fmt.Sprintf("%s %s", prefix, todo.text)
 		}
 
-		for tidx, r := range text {
-			v.SetContent(tidx, idx, r, style)
-		}
+		v.SetTextContent(0, idx, text, style)
 
 		if v.Mode == gotuit.InputMode && todo.temp {
 			v.Cursorx = len(prefix) + v.InputCursor + 1
@@ -169,9 +160,7 @@ func (m *Model) renderStatusLine(v *gotuit.View) {
 	if logLine != "" {
 		statusText += ", Log: " + logLine
 	}
-	for xidx, r := range statusText {
-		v.SetContent(xidx, 0, r, style)
-	}
+	v.SetTextContent(0, 0, statusText, style)
 }
 
 type DataSchema struct {
@@ -315,44 +304,6 @@ type TodoDataSchema struct {
 	Text     string `json:"text"`
 	Complete bool   `json:"complete"`
 	Temp     bool   `json:"temp"`
-}
-
-func drawText(screen tcell.Screen, x, y int, style tcell.Style, text string) {
-	for idx, r := range text {
-		screen.SetContent(x+idx, y, r, nil, style)
-	}
-}
-
-func drawBox(screen tcell.Screen, x, y, width, height int, style tcell.Style) {
-	x2 := x + width
-	y2 := y + height
-	for yidx := y; yidx < y2; yidx++ {
-		for xidx := x; xidx < x2; xidx++ {
-			screen.SetContent(xidx, yidx, ' ', nil, style)
-		}
-	}
-
-	for col := x; col < x2; col++ {
-		screen.SetContent(col, y, tcell.RuneHLine, nil, style)
-		screen.SetContent(col, y+height, tcell.RuneHLine, nil, style)
-	}
-	for row := y; row < y+height; row++ {
-		screen.SetContent(x, row, tcell.RuneVLine, nil, style)
-		screen.SetContent(x+width, row, tcell.RuneVLine, nil, style)
-	}
-
-	screen.SetContent(x, y, tcell.RuneULCorner, nil, style)
-	screen.SetContent(x+width, y, tcell.RuneURCorner, nil, style)
-	screen.SetContent(x, y+height, tcell.RuneLLCorner, nil, style)
-	screen.SetContent(x+width, y+height, tcell.RuneLRCorner, nil, style)
-}
-
-func drawLine(screen tcell.Screen, x, y, width int, style tcell.Style) {
-	x2 := x + width
-
-	for xidx := x; xidx < x2; xidx++ {
-		screen.SetContent(xidx, y, ' ', nil, style)
-	}
 }
 
 func (m *Model) onTodoListCursorDown(v *gotuit.View) {

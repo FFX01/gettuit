@@ -113,6 +113,15 @@ func (v *View) SetContent(x, y int, r rune, style tcell.Style) {
 	v.cells = append(v.cells, cell{x: x, y: y, char: r, style: style})
 }
 
+func (v *View) SetTextContent(x, y int, text string, style tcell.Style) {
+    width := v.InnerWidth()
+    for xidx, t := range text {
+        if xidx < width {
+            v.SetContent(x+xidx, y, t, style)
+        }
+    }
+}
+
 func (v *View) Clear() {
 	v.cells = []cell{}
 }
