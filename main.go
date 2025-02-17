@@ -305,58 +305,6 @@ func (m *Model) onTodoListInputRight(v *gotuit.View) {
 	}
 }
 
-// func (app *App) DrawHelpModal() {
-// 	width, height := app.screen.Size()
-// 	modalWidth := 70
-// 	marginX := (width - modalWidth) / 2
-// 	modalHeight := 50
-// 	marginY := (height - modalHeight) / 2
-//
-// 	style := tcell.StyleDefault.Background(backgroundColor)
-//
-// 	drawBox(app.screen, marginX, marginY, modalWidth, modalHeight, style)
-//
-// 	yIndex := marginY + 1
-// 	xIndex := marginX + 4
-//
-// 	// Draw Normal mode header
-// 	headerText := "Normal Mode"
-// 	headerStartX := marginX + ((modalWidth - len(headerText)) / 2)
-// 	drawText(app.screen, headerStartX, yIndex, style, headerText)
-// 	yIndex += 2
-//
-// 	// Draw normal mode help
-// 	helpTexts, exists := app.keybindHelpText[gotuit.NormalMode]
-// 	if !exists {
-// 		return
-// 	}
-// 	for _, t := range helpTexts {
-// 		drawText(app.screen, xIndex, yIndex, style, t)
-// 		yIndex++
-// 	}
-// 	yIndex += 2
-//
-// 	// Draw Input Mode Header
-// 	headerText = "Input Mode"
-// 	headerStartX = marginX + ((modalWidth - len(headerText)) / 2)
-// 	drawText(app.screen, headerStartX, yIndex, style, headerText)
-// 	yIndex += 2
-//
-// 	helpTexts, exists = app.keybindHelpText[gotuit.InputMode]
-// 	if !exists {
-// 		return
-// 	}
-// 	for _, t := range helpTexts {
-// 		drawText(app.screen, xIndex, yIndex, style, t)
-// 		yIndex++
-// 	}
-//
-// 	bottomTextStartY := marginY + modalHeight - 2
-// 	bottomTextStartX := marginX + 4
-// 	bottomText := "'?' to view this window, `Esc` to exit this window"
-// 	drawText(app.screen, bottomTextStartX, bottomTextStartY, style, bottomText)
-// }
-
 type Todo struct {
 	text     string
 	complete bool
