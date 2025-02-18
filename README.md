@@ -23,3 +23,9 @@ this time. If you want to make changes, just create a fork and make a PR against
 repo's main branch. Do be aware that the `internal/gotuit` module will eventually be 
 broken out into an external package. Also be aware that this code is under heavy 
 development and may change drastically on a daily, or even hourly basis.
+
+## Development Journal
+If you want to follow development of this project, you can check out these articles on
+my personal blog here:
+- https://justindev.io/tag/gettuit.html
+- https://justindev.io/tag/gotui.html
