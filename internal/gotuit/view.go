@@ -3,6 +3,8 @@ package gotuit
 import (
 	"errors"
 	"fmt"
+	"log/slog"
+
 	"github.com/gdamore/tcell/v2"
 )
 
@@ -25,6 +27,9 @@ type View struct {
 	InputCursor      int
 	fillColor        tcell.Color
 	visible          bool
+	Parent           *View
+	Children         []*View
+	focusedview      string
 }
 
 func NewView(name string, x, y, w, h int, renderFunc func(*View)) *View {
@@ -41,9 +46,36 @@ func NewView(name string, x, y, w, h int, renderFunc func(*View)) *View {
 		inputBuffer: []rune{},
 		fillColor:   tcell.ColorDefault,
 		visible:     true,
+		focusedview: name,
 	}
 
 	return &v
+}
+
+func (v *View) GetFocusedView() (*View, error) {
+    if v.focusedview == v.Name {
+        return v, nil
+    }
+
+	for _, c := range v.Children {
+		if c.Name == v.focusedview {
+			return c, nil
+		}
+	}
+	return nil, errors.New("Child not found")
+}
+
+func (self *View) Focus(viewName string) {
+    self.focusedview = viewName
+}
+
+func (self *View) FocusedView() string {
+    return self.focusedview
+}
+
+func (parent *View) AddChild(child *View) {
+	child.Parent = parent
+	parent.Children = append(parent.Children, child)
 }
 
 type Keybind struct {
@@ -91,6 +123,14 @@ func (v *View) getInnerBounds() (x1, y1, x2, y2 int) {
 		x2 = v.x
 	}
 
+	if v.Parent != nil {
+		px1, py1, px2, py2 := v.Parent.getInnerBounds()
+		x1 += px1
+		y1 += py1
+		x2 -= px2
+		y2 -= py2
+	}
+
 	return x1, y1, x2, y2
 }
 
@@ -99,6 +139,15 @@ func (v *View) getOuterBounds() (x1, y1, x2, y2 int) {
 	y1 = v.y
 	x2 = v.x + v.w - 1
 	y2 = v.y + v.h - 1
+
+	if v.Parent != nil {
+		px1, py1, _, _ := v.Parent.getInnerBounds()
+		x1 += px1
+		y1 += py1
+		x2 += px1
+		y2 += py1
+	}
+
 	return x1, y1, x2, y2
 }
 
@@ -114,12 +163,12 @@ func (v *View) SetContent(x, y int, r rune, style tcell.Style) {
 }
 
 func (v *View) SetTextContent(x, y int, text string, style tcell.Style) {
-    width := v.InnerWidth()
-    for xidx, t := range text {
-        if xidx < width {
-            v.SetContent(x+xidx, y, t, style)
-        }
-    }
+	width := v.InnerWidth()
+	for xidx, t := range text {
+		if xidx < width {
+			v.SetContent(x+xidx, y, t, style)
+		}
+	}
 }
 
 func (v *View) Clear() {
@@ -159,6 +208,17 @@ func (v *View) Draw(screen tcell.Screen) {
 		y := y1 + cell.y
 		screen.SetContent(x, y, cell.char, nil, cell.style)
 	}
+
+	if len(v.Children) > 0 {
+		for _, child := range v.Children {
+			if !child.visible {
+				continue
+			}
+            child.Clear()
+			child.renderFunc(child)
+			child.Draw(screen)
+		}
+	}
 }
 
 func (v *View) Bind(mode Mode, key tcell.Key, name, description string, cb func(*View)) {
@@ -183,22 +243,34 @@ func (v *View) handleInputRune(r rune) {
 	v.InputCursor++
 }
 
-func (v *View) handleEvent(ev tcell.Event) {
+func (self *View) handleEvent(ev tcell.Event) {
+    if len(self.Children) > 0 {
+        if self.focusedview != self.Name {
+            focusedView, err := self.GetFocusedView()
+            if err != nil {
+                slog.Error("No focused child view", "error", err)
+            } else {
+                focusedView.handleEvent(ev)
+                return
+            }
+        }
+    }
+
 	switch ev := ev.(type) {
 	case *tcell.EventKey:
 		var key tcell.Key
 		if ev.Key() == tcell.KeyRune {
-			if v.Mode == InputMode {
-				v.handleInputRune(ev.Rune())
+			if self.Mode == InputMode {
+				self.handleInputRune(ev.Rune())
 				return
 			}
 			key = tcell.Key(ev.Rune())
 		} else {
 			key = ev.Key()
 		}
-		kb, err := v.getKeybind(v.Mode, key)
+		kb, err := self.getKeybind(self.Mode, key)
 		if err == nil {
-			kb.callback(v)
+			kb.callback(self)
 		}
 	}
 }
@@ -223,12 +295,16 @@ func (v *View) Width() int {
 	return v.w
 }
 
+func (v *View) Height() int {
+	return v.h
+}
+
 func (v *View) InnerWidth() int {
 	return v.w - v.paddingl - v.paddingr - 2
 }
 
 func (v *View) InnerHeight() int {
-	return v.h - v.paddingt - v.paddingb - 3
+	return v.h - v.paddingt - v.paddingb
 }
 
 func (v *View) ShowCursor() {

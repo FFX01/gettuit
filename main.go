@@ -190,6 +190,17 @@ func (m *Model) renderStatusLine(v *gotuit.View) {
 	v.SetTextContent(0, 0, statusText, style)
 }
 
+func (m *Model) renderTestChild(v *gotuit.View) {
+    style := tcell.StyleDefault.Background(backgroundColor).Foreground(foregroundColor)
+    text := "Child Test, Focused: "
+    if v.Parent.FocusedView() == "Test Child" {
+        text += "true"
+    } else {
+        text += "false"
+    }
+    v.SetTextContent(0, 0, text, style)
+}
+
 type DataSchema struct {
 	Todos []TodoDataSchema `json:"todos"`
 }
@@ -454,6 +465,14 @@ func (m *Model) onPreviousSearchMatch(v *gotuit.View) {
 	}
 }
 
+func (m *Model) onTodoListToggleFocus(v *gotuit.View) {
+   if v.Name == "Todo List" {
+       v.Focus("Test Child")
+   } else if v.Name == "Test Child" {
+       v.Parent.Focus("Todo List")
+   }
+}
+
 func main() {
 	model := Model{}
 	model.Init()
@@ -468,6 +487,8 @@ func main() {
 	list.SetPadding(1, 1, 2, 1)
 	list.Bind(gotuit.NormalMode, 'k', "Up", "Move cursor up", model.onTodoListCursorUp)
 	list.Bind(gotuit.NormalMode, 'j', "Down", "Move cursor down", model.onTodoListCursorDown)
+	list.Bind(gotuit.NormalMode, tcell.KeyUp, "Up", "Move cursor up", model.onTodoListCursorUp)
+	list.Bind(gotuit.NormalMode, tcell.KeyDown, "Down", "Move cursor down", model.onTodoListCursorDown)
 	list.Bind(gotuit.NormalMode, tcell.KeyCtrlK, "Move Up", "Move item up", model.onTodoListMoveTodoUp)
 	list.Bind(gotuit.NormalMode, tcell.KeyCtrlJ, "Move Down", "Move item down", model.onTodoListMoveTodoDown)
 	list.Bind(gotuit.NormalMode, ' ', "Toggle Complete", "Toggle completion status", model.onTodoListToggleComplete)
@@ -480,12 +501,18 @@ func main() {
 	list.Bind(gotuit.NormalMode, '/', "Search", "Enter search mode", onEnterSearchMode)
 	list.Bind(gotuit.NormalMode, 'n', "Next", "Next Search Match", model.onNextSearchMatch)
 	list.Bind(gotuit.NormalMode, 'N', "Previous", "Previous search match", model.onPreviousSearchMatch)
+    list.Bind(gotuit.NormalMode, tcell.KeyTAB, "Focus Toggle", "Toggle child focus", model.onTodoListToggleFocus)
 	list.Bind(gotuit.InputMode, tcell.KeyEnter, "Confirm", "Confirm changes", model.onTodoListConfirmTodo)
 	list.Bind(gotuit.InputMode, tcell.KeyBackspace, "Backspace", "Backspace", model.onTodoListInputBackspace)
 	list.Bind(gotuit.InputMode, tcell.KeyBackspace2, "Backspace", "Backspace", model.onTodoListInputBackspace)
 	list.Bind(gotuit.InputMode, tcell.KeyLeft, "Left", "Move cursor left", model.onTodoListInputLeft)
 	list.Bind(gotuit.InputMode, tcell.KeyRight, "Right", "Move cursor right", model.onTodoListInputRight)
 	list.Bind(gotuit.InputMode, tcell.KeyEscape, "Exit", "Cancel Changes", model.onTodoListInputEscape)
+
+    testChild := gotuit.NewView("Test Child", 0, list.InnerHeight()-3, list.InnerWidth(), 3, model.renderTestChild)
+    testChild.SetFillColor(backgroundColor)
+    list.AddChild(testChild)
+    testChild.Bind(gotuit.NormalMode, tcell.KeyTAB, "Focus Toggle", "Toggle Focus", model.onTodoListToggleFocus)
 
 	title := gotuit.NewView("Title", 0, 0, width, 1, model.renderTitle)
 
