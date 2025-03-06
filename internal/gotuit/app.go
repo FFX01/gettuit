@@ -2,10 +2,12 @@ package gotuit
 
 import (
 	"errors"
-	"github.com/gdamore/tcell/v2"
+	"fmt"
 	"log"
 	"log/slog"
 	"os"
+
+	"github.com/gdamore/tcell/v2"
 )
 
 type App struct {
@@ -25,7 +27,7 @@ func (app *App) Write(p []byte) (n int, err error) {
 
 func (app *App) PopLog() string {
 	if len(app.logs) < 1 {
-		return ""
+		return "none"
 	}
 
 	v := app.logs[0]
@@ -55,6 +57,7 @@ func NewApp() *App {
 
 	app := App{
 		screen: screen,
+        logs: make([]string, 0),
 	}
 
 	if err != nil {
@@ -84,8 +87,15 @@ func (app *App) AddView(v *View) {
 	app.views = append(app.views, v)
 }
 
-func (app *App) Focus(viewName string) {
-	app.focusedView = viewName
+func (app *App) Focus(viewName string) error {
+    for _, v := range app.views {
+        if v.Name == viewName {
+            app.focusedView = viewName
+            slog.Debug("Switching focus", "view", app.focusedView)
+            return nil
+        }
+    }
+    return fmt.Errorf("View with name '%s' does not exist", viewName)
 }
 
 func (app *App) GetView(name string) (view *View, ok bool) {

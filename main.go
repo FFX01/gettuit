@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"slices"
 	"strings"
@@ -18,8 +19,9 @@ var modeMap = map[gotuit.Mode]string{
 }
 
 var (
-	backgroundColor tcell.Color = tcell.NewHexColor(0x284B63)
-	foregroundColor tcell.Color = tcell.NewHexColor(0xF4F9E9)
+	backgroundColor  tcell.Color = tcell.NewHexColor(0x284B63)
+	foregroundColor  tcell.Color = tcell.NewHexColor(0xF4F9E9)
+	focusBorderColor tcell.Color = tcell.NewHexColor(0x5BC0BE)
 )
 
 type Model struct {
@@ -165,6 +167,12 @@ func (m *Model) renderTodos(v *gotuit.View) {
 			v.SetTextContent(sm.x+4, sm.y, text, tcell.StyleDefault.Background(tcell.ColorDarkGreen))
 		}
 	}
+
+	if v.IsFocused() {
+		v.SetBorderColor(focusBorderColor)
+	} else {
+		v.SetBorderColor(tcell.ColorDefault)
+	}
 }
 
 func (m *Model) renderStatusLine(v *gotuit.View) {
@@ -191,14 +199,16 @@ func (m *Model) renderStatusLine(v *gotuit.View) {
 }
 
 func (m *Model) renderTestChild(v *gotuit.View) {
-    style := tcell.StyleDefault.Background(backgroundColor).Foreground(foregroundColor)
-    text := "Child Test, Focused: "
-    if v.Parent.FocusedView() == "Test Child" {
-        text += "true"
-    } else {
-        text += "false"
-    }
-    v.SetTextContent(0, 0, text, style)
+	style := tcell.StyleDefault.Background(backgroundColor).Foreground(foregroundColor)
+	text := "Child Test, Focused: "
+	if v.IsFocused() {
+		text += "true"
+		v.SetBorderColor(focusBorderColor)
+	} else {
+		text += "false"
+		v.SetBorderColor(tcell.ColorDefault)
+	}
+	v.SetTextContent(0, 0, text, style)
 }
 
 type DataSchema struct {
@@ -368,7 +378,11 @@ func (m *Model) onGlobalShowHelp(app *gotuit.App) {
 		m.helpModalViewName = focusedView.Name
 	}
 	app.ShowView("Help Modal")
-	app.Focus("Help Modal")
+	err = app.Focus("Help Modal")
+	if err != nil {
+		log.Fatal("Help Modal view does not exist")
+		os.Exit(1)
+	}
 }
 
 func (m *Model) onHelpExit(v *gotuit.View) {
@@ -377,17 +391,28 @@ func (m *Model) onHelpExit(v *gotuit.View) {
 	if !ok {
 		log.Fatal("Something went terribly wrong")
 	}
-	v.App.Focus(previousView.Name)
+	err := v.App.Focus(previousView.Name)
+	if err != nil {
+		msg := fmt.Sprintf("%s view does not exist", previousView.Name)
+		log.Fatal(msg)
+		os.Exit(1)
+	}
 }
 
 func onEnterSearchMode(v *gotuit.View) {
 	searchLine, ok := v.App.GetView("Search Line")
 	if !ok {
 		log.Fatal("View should exist, but doesn't somehow")
+		os.Exit(1)
 	}
 	v.App.HideView("Status Line")
 	v.App.ShowView("Search Line")
-	v.App.Focus("Search Line")
+	err := v.App.Focus("Search Line")
+	if err != nil {
+		log.Fatal("Search Line view does not exist")
+		os.Exit(1)
+	}
+	searchLine.SetBorderColor(focusBorderColor)
 	searchLine.Mode = gotuit.InputMode
 }
 
@@ -395,7 +420,11 @@ func onExitSearchMode(v *gotuit.View) {
 	v.ClearInputBuffer()
 	v.App.HideView("Search Line")
 	v.App.ShowView("Status Line")
-	v.App.Focus("Todo List")
+	err := v.App.Focus("Todo List")
+	if err != nil {
+		slog.Error("Todo List view Does not exist", "error", err)
+		os.Exit(1)
+	}
 }
 
 func (m *Model) findSearchMatches(searchText string) {
@@ -418,7 +447,11 @@ func (m *Model) onSearchConfirm(v *gotuit.View) {
 	v.ClearInputBuffer()
 	v.Hide()
 	v.App.ShowView("Status Line")
-	v.App.Focus("Todo List")
+	err := v.App.Focus("Todo List")
+	if err != nil {
+		log.Fatal("Todo List view does not exist")
+		os.Exit(1)
+	}
 	if len(m.searchMatches) > 0 {
 		list, ok := v.App.GetView("Todo List")
 		if !ok {
@@ -466,11 +499,50 @@ func (m *Model) onPreviousSearchMatch(v *gotuit.View) {
 }
 
 func (m *Model) onTodoListToggleFocus(v *gotuit.View) {
-   if v.Name == "Todo List" {
-       v.Focus("Test Child")
-   } else if v.Name == "Test Child" {
-       v.Parent.Focus("Todo List")
-   }
+	if v.Name == "Todo List" {
+		err := v.Focus("Test Child")
+		if err != nil {
+			log.Fatal("Test Child View does not exist")
+			os.Exit(1)
+		}
+	} else if v.Name == "Test Child" {
+		err := v.Parent.Focus("Todo List")
+		if err != nil {
+			log.Fatal("Todo List view does not exist")
+			os.Exit(1)
+		}
+	}
+}
+
+func (m *Model) onTodoListEscape(v *gotuit.View) {
+	m.searchMatches = make([]searchMatch, 0)
+}
+
+type ViewObject interface {
+	Render(*gotuit.View)
+	HandleEvent(tcell.Event)
+}
+
+type Input struct {
+	buffer  []rune
+	cursorX int
+}
+
+func (self *Input) HandleEvent(ev tcell.Event) {
+	switch ev := ev.(type) {
+	case *tcell.EventKey:
+		switch ev.Key() {
+		case tcell.KeyRune:
+			self.buffer = append(self.buffer, ev.Rune())
+			return
+		}
+	}
+}
+
+func (self *Input) Render(v *gotuit.View) {
+	v.SetTextContent(0, 0, string(self.buffer), tcell.StyleDefault)
+	self.cursorX = len(self.buffer)
+    v.ShowCursor()
 }
 
 func main() {
@@ -480,6 +552,10 @@ func main() {
 	defer app.Cleanup()
 
 	log.SetOutput(app)
+	slogHandler := slog.NewTextHandler(app, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	})
+	slog.SetDefault(slog.New(slogHandler))
 
 	width, height := app.Size()
 
@@ -501,7 +577,8 @@ func main() {
 	list.Bind(gotuit.NormalMode, '/', "Search", "Enter search mode", onEnterSearchMode)
 	list.Bind(gotuit.NormalMode, 'n', "Next", "Next Search Match", model.onNextSearchMatch)
 	list.Bind(gotuit.NormalMode, 'N', "Previous", "Previous search match", model.onPreviousSearchMatch)
-    list.Bind(gotuit.NormalMode, tcell.KeyTAB, "Focus Toggle", "Toggle child focus", model.onTodoListToggleFocus)
+	list.Bind(gotuit.NormalMode, tcell.KeyTAB, "Focus Toggle", "Toggle child focus", model.onTodoListToggleFocus)
+	list.Bind(gotuit.NormalMode, tcell.KeyEscape, "Exit Search", "Exit search and clear results", model.onTodoListEscape)
 	list.Bind(gotuit.InputMode, tcell.KeyEnter, "Confirm", "Confirm changes", model.onTodoListConfirmTodo)
 	list.Bind(gotuit.InputMode, tcell.KeyBackspace, "Backspace", "Backspace", model.onTodoListInputBackspace)
 	list.Bind(gotuit.InputMode, tcell.KeyBackspace2, "Backspace", "Backspace", model.onTodoListInputBackspace)
@@ -509,10 +586,10 @@ func main() {
 	list.Bind(gotuit.InputMode, tcell.KeyRight, "Right", "Move cursor right", model.onTodoListInputRight)
 	list.Bind(gotuit.InputMode, tcell.KeyEscape, "Exit", "Cancel Changes", model.onTodoListInputEscape)
 
-    testChild := gotuit.NewView("Test Child", 0, list.InnerHeight()-3, list.InnerWidth(), 3, model.renderTestChild)
-    testChild.SetFillColor(backgroundColor)
-    list.AddChild(testChild)
-    testChild.Bind(gotuit.NormalMode, tcell.KeyTAB, "Focus Toggle", "Toggle Focus", model.onTodoListToggleFocus)
+	testChild := gotuit.NewView("Test Child", 0, list.InnerHeight()-3, list.InnerWidth(), 3, model.renderTestChild)
+	testChild.SetFillColor(backgroundColor)
+	list.AddChild(testChild)
+	testChild.Bind(gotuit.NormalMode, tcell.KeyTAB, "Focus Toggle", "Toggle Focus", model.onTodoListToggleFocus)
 
 	title := gotuit.NewView("Title", 0, 0, width, 1, model.renderTitle)
 
@@ -537,7 +614,11 @@ func main() {
 	app.AddView(helpModal)
 	app.AddView(searchLine)
 
-	app.Focus("Todo List")
+	err := app.Focus("Todo List")
+	if err != nil {
+		log.Fatal("Todo List View does not exist!", "error", err)
+		os.Exit(1)
+	}
 
 	app.Bind(tcell.KeyCtrlC, "Quit", "Quit program", onGlobalQuit)
 	app.Bind(tcell.KeyF1, "Help", "Show Help", model.onGlobalShowHelp)

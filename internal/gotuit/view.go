@@ -26,6 +26,7 @@ type View struct {
 	inputBuffer      []rune
 	InputCursor      int
 	fillColor        tcell.Color
+	borderColor      tcell.Color
 	visible          bool
 	Parent           *View
 	Children         []*View
@@ -45,6 +46,7 @@ func NewView(name string, x, y, w, h int, renderFunc func(*View)) *View {
 		border:      true,
 		inputBuffer: []rune{},
 		fillColor:   tcell.ColorDefault,
+		borderColor: tcell.ColorDefault,
 		visible:     true,
 		focusedview: name,
 	}
@@ -53,9 +55,9 @@ func NewView(name string, x, y, w, h int, renderFunc func(*View)) *View {
 }
 
 func (v *View) GetFocusedView() (*View, error) {
-    if v.focusedview == v.Name {
-        return v, nil
-    }
+	if v.focusedview == v.Name {
+		return v, nil
+	}
 
 	for _, c := range v.Children {
 		if c.Name == v.focusedview {
@@ -65,17 +67,54 @@ func (v *View) GetFocusedView() (*View, error) {
 	return nil, errors.New("Child not found")
 }
 
-func (self *View) Focus(viewName string) {
-    self.focusedview = viewName
+// Focus sets the View.focusedview attribute to viewName.
+//
+// viewName must be the name of the calling view or the name of a view contained in
+// View.Children. If the viewName is invalid, this function will return an error.
+func (self *View) Focus(viewName string) error {
+	if viewName == self.Name {
+		self.focusedview = viewName
+		return nil
+	}
+	for _, child := range self.Children {
+		if child.Name == viewName {
+			self.focusedview = viewName
+			return nil
+		}
+	}
+	return fmt.Errorf("View with name '%s' does not exist", viewName)
+}
+
+// IsFocused returns a boolean value specifying whether the calling view has focus within
+// its parent.
+func (v *View) IsFocused() bool {
+	if v.Parent != nil && v.Name == v.Parent.focusedview {
+		return true
+	}
+
+	if v.App != nil && v.App.focusedView == v.Name {
+		return true
+	}
+
+	return false
 }
 
 func (self *View) FocusedView() string {
-    return self.focusedview
+	return self.focusedview
 }
 
 func (parent *View) AddChild(child *View) {
 	child.Parent = parent
 	parent.Children = append(parent.Children, child)
+}
+
+func (parent *View) GetView(name string) (view *View, ok bool) {
+	for _, v := range parent.Children {
+		if v.Name == name {
+			return v, true
+		}
+	}
+	return nil, false
 }
 
 type Keybind struct {
@@ -187,19 +226,20 @@ func (v *View) Draw(screen tcell.Screen) {
 		}
 	}
 
+	borderStyle := tcell.StyleDefault.Background(v.fillColor).Foreground(v.borderColor)
 	if v.border && v.h > 2 {
-		screen.SetContent(bx1, by1, tcell.RuneULCorner, nil, fillStyle)
-		screen.SetContent(bx2, by1, tcell.RuneURCorner, nil, fillStyle)
-		screen.SetContent(bx1, by2, tcell.RuneLLCorner, nil, fillStyle)
-		screen.SetContent(bx2, by2, tcell.RuneLRCorner, nil, fillStyle)
+		screen.SetContent(bx1, by1, tcell.RuneULCorner, nil, borderStyle)
+		screen.SetContent(bx2, by1, tcell.RuneURCorner, nil, borderStyle)
+		screen.SetContent(bx1, by2, tcell.RuneLLCorner, nil, borderStyle)
+		screen.SetContent(bx2, by2, tcell.RuneLRCorner, nil, borderStyle)
 
 		for xidx := bx1 + 1; xidx < bx2; xidx++ {
-			screen.SetContent(xidx, by1, tcell.RuneHLine, nil, fillStyle)
-			screen.SetContent(xidx, by2, tcell.RuneHLine, nil, fillStyle)
+			screen.SetContent(xidx, by1, tcell.RuneHLine, nil, borderStyle)
+			screen.SetContent(xidx, by2, tcell.RuneHLine, nil, borderStyle)
 		}
 		for yidx := by1 + 1; yidx < by2; yidx++ {
-			screen.SetContent(bx1, yidx, tcell.RuneVLine, nil, fillStyle)
-			screen.SetContent(bx2, yidx, tcell.RuneVLine, nil, fillStyle)
+			screen.SetContent(bx1, yidx, tcell.RuneVLine, nil, borderStyle)
+			screen.SetContent(bx2, yidx, tcell.RuneVLine, nil, borderStyle)
 		}
 	}
 
@@ -214,7 +254,7 @@ func (v *View) Draw(screen tcell.Screen) {
 			if !child.visible {
 				continue
 			}
-            child.Clear()
+			child.Clear()
 			child.renderFunc(child)
 			child.Draw(screen)
 		}
@@ -244,17 +284,17 @@ func (v *View) handleInputRune(r rune) {
 }
 
 func (self *View) handleEvent(ev tcell.Event) {
-    if len(self.Children) > 0 {
-        if self.focusedview != self.Name {
-            focusedView, err := self.GetFocusedView()
-            if err != nil {
-                slog.Error("No focused child view", "error", err)
-            } else {
-                focusedView.handleEvent(ev)
-                return
-            }
-        }
-    }
+	if len(self.Children) > 0 {
+		if self.focusedview != self.Name {
+			focusedView, err := self.GetFocusedView()
+			if err != nil {
+				slog.Error("No focused child view", "error", err)
+			} else {
+				focusedView.handleEvent(ev)
+				return
+			}
+		}
+	}
 
 	switch ev := ev.(type) {
 	case *tcell.EventKey:
@@ -331,6 +371,10 @@ func (v *View) ClearInputBuffer() {
 
 func (v *View) SetFillColor(color tcell.Color) {
 	v.fillColor = color
+}
+
+func (v *View) SetBorderColor(color tcell.Color) {
+	v.borderColor = color
 }
 
 func (v *View) Show() {
